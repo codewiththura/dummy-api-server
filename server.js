@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 
 const app = express();
-const PORT = 5000;
+const PORT = process.env.PORT || 5000;
 
 app.use(cors());
 app.use(express.json());
@@ -88,11 +88,13 @@ let posts = [
     userId: 1,
     title: "Getting Started with React",
     body: "React is a JavaScript library for building user interfaces.",
-    imageUrl: "https://picsum.photos/seed/react-intro/600/350",
+    imageUrl:
+      "https://unsplash.com/photos/4hbJ-eymZ1o/download?force=true&w=640",
     likes: [2, 3, 4, 5],
     likesCount: 4,
     savedBy: [2],
     isSaved: false,
+    isArchived: false,
     createdAt: "2026-08-20T10:00:00.000Z",
     updatedAt: "2026-08-20T10:00:00.000Z",
   },
@@ -101,11 +103,13 @@ let posts = [
     userId: 2,
     title: "Understanding useState Hook",
     body: "The useState hook lets you add state to functional components.",
-    imageUrl: "https://picsum.photos/seed/usestate-hook/600/350",
+    imageUrl:
+      "https://unsplash.com/photos/m_HRfLhgABo/download?force=true&w=640",
     likes: [1, 3, 4],
     likesCount: 3,
     savedBy: [1, 3],
     isSaved: true,
+    isArchived: false,
     createdAt: "2026-08-21T09:30:00.000Z",
     updatedAt: "2026-08-21T09:30:00.000Z",
   },
@@ -114,11 +118,13 @@ let posts = [
     userId: 3,
     title: "Props and Component Communication",
     body: "Props are the way components talk to each other in React. A parent component can pass data down to its children through props.",
-    imageUrl: "https://picsum.photos/seed/props-react/600/350",
+    imageUrl:
+      "https://unsplash.com/photos/9WnjxT1NCoY/download?force=true&w=640",
     likes: [1, 2, 4, 6],
     likesCount: 4,
     savedBy: [2],
     isSaved: false,
+    isArchived: false,
     createdAt: "2026-08-22T14:15:00.000Z",
     updatedAt: "2026-08-22T14:15:00.000Z",
   },
@@ -127,11 +133,13 @@ let posts = [
     userId: 4,
     title: "React Router for Navigation",
     body: "React Router lets you handle navigation in a single page application with seamless client-side routing.",
-    imageUrl: "https://picsum.photos/seed/react-router/600/350",
+    imageUrl:
+      "https://unsplash.com/photos/vpOeXr5wmR4/download?force=true&w=640",
     likes: [1, 2, 3, 5],
     likesCount: 4,
     savedBy: [1, 5],
     isSaved: false,
+    isArchived: false,
     createdAt: "2026-08-23T11:45:00.000Z",
     updatedAt: "2026-08-23T11:45:00.000Z",
   },
@@ -172,6 +180,7 @@ function formatPost(post, currentUserId = CURRENT_USER_ID) {
 
   return {
     ...post,
+    isArchived: Boolean(post.isArchived),
     userId: post.userId,
     author: authorUser
       ? {
@@ -221,9 +230,7 @@ app.post("/api/auth/register", (req, res) => {
     username: rawUsername,
     email: normalizedEmail,
     password,
-    avatarUrl:
-      avatarUrl ||
-      `[https://i.pravatar.cc/150?u=$](https://i.pravatar.cc/150?u=$){rawUsername}`,
+    avatarUrl: avatarUrl || `https://i.pravatar.cc/150?u=${rawUsername}`,
     bio: bio || "Hello, I am using Social App!",
     createdAt: now,
     updatedAt: now,
@@ -272,8 +279,34 @@ app.post("/api/auth/logout", (req, res) => {
 
 // GET /api/posts
 app.get("/api/posts", (req, res) => {
-  const userId = req.query.userId ? Number(req.query.userId) : CURRENT_USER_ID;
-  const formattedPosts = posts.map((p) => formatPost(p, userId));
+  const currentUserId = CURRENT_USER_ID;
+  const requestedUserId = req.query.userId ? Number(req.query.userId) : null;
+  const isArchivedQuery =
+    req.query.archived === "true" ||
+    req.query.isArchived === "true" ||
+    req.query.includeArchived === "true";
+
+  let filtered = posts;
+
+  // Filter by userId if provided in query params
+  if (requestedUserId) {
+    filtered = filtered.filter((p) => Number(p.userId) === requestedUserId);
+  }
+
+  // Handle archive visibility rules:
+  // - If archived query is explicitly requested, ONLY return archived posts belonging to current logged-in user.
+  // - If archived query is omitted/false, exclude all archived posts.
+  if (isArchivedQuery) {
+    filtered = filtered.filter(
+      (p) =>
+        Boolean(p.isArchived) && Number(p.userId) === Number(currentUserId),
+    );
+  } else {
+    filtered = filtered.filter((p) => !p.isArchived);
+  }
+
+  const userIdForFormat = requestedUserId || currentUserId;
+  const formattedPosts = filtered.map((p) => formatPost(p, userIdForFormat));
   return res.json(formattedPosts);
 });
 
@@ -281,6 +314,13 @@ app.get("/api/posts", (req, res) => {
 app.get("/api/posts/:id", (req, res) => {
   const post = posts.find((p) => p.id === Number(req.params.id));
   if (!post) return res.status(404).json({ error: "Post not found" });
+
+  if (post.isArchived && Number(post.userId) !== Number(CURRENT_USER_ID)) {
+    return res
+      .status(403)
+      .json({ error: "Archived post can only be viewed by its author" });
+  }
+
   return res.json(formatPost(post, CURRENT_USER_ID));
 });
 
@@ -295,19 +335,86 @@ app.post("/api/posts", (req, res) => {
     userId: CURRENT_USER_ID || 1,
     title,
     body: body || "",
-    imageUrl:
-      imageUrl ||
-      `[https://picsum.photos/seed/$](https://picsum.photos/seed/$){Date.now()}/600/350`,
+    imageUrl: imageUrl || `https://picsum.photos/seed/${Date.now()}/600/350`,
     likes: [],
     likesCount: 0,
     savedBy: [],
     isSaved: false,
+    isArchived: false,
     createdAt: now,
     updatedAt: now,
   };
 
   posts.unshift(newPost);
   return res.status(201).json(formatPost(newPost, CURRENT_USER_ID));
+});
+
+// PUT /api/posts/:id (Edit Post)
+app.put("/api/posts/:id", (req, res) => {
+  const post = posts.find((p) => p.id === Number(req.params.id));
+  if (!post) return res.status(404).json({ error: "Post not found" });
+
+  const currentUserId = CURRENT_USER_ID || 1;
+  if (Number(post.userId) !== Number(currentUserId)) {
+    return res
+      .status(403)
+      .json({ error: "Unauthorized: You can only edit your own posts" });
+  }
+
+  const { title, body, imageUrl, isArchived } = req.body;
+  if (title !== undefined) post.title = title;
+  if (body !== undefined) post.body = body;
+  if (imageUrl !== undefined) post.imageUrl = imageUrl;
+  if (isArchived !== undefined) post.isArchived = Boolean(isArchived);
+
+  post.updatedAt = new Date().toISOString();
+  return res.json(formatPost(post, currentUserId));
+});
+
+// POST /api/posts/:id/archive (Archive / Unarchive Post)
+app.post("/api/posts/:id/archive", (req, res) => {
+  const post = posts.find((p) => p.id === Number(req.params.id));
+  if (!post) return res.status(404).json({ error: "Post not found" });
+
+  const currentUserId = CURRENT_USER_ID || 1;
+  if (Number(post.userId) !== Number(currentUserId)) {
+    return res
+      .status(403)
+      .json({ error: "Unauthorized: You can only archive your own posts" });
+  }
+
+  if (req.body && req.body.isArchived !== undefined) {
+    post.isArchived = Boolean(req.body.isArchived);
+  } else {
+    post.isArchived = !post.isArchived;
+  }
+
+  post.updatedAt = new Date().toISOString();
+  return res.json(formatPost(post, currentUserId));
+});
+
+// DELETE /api/posts/:id (Delete Post)
+app.delete("/api/posts/:id", (req, res) => {
+  const postIndex = posts.findIndex((p) => p.id === Number(req.params.id));
+  if (postIndex === -1)
+    return res.status(404).json({ error: "Post not found" });
+
+  const post = posts[postIndex];
+  const currentUserId = CURRENT_USER_ID || 1;
+  if (Number(post.userId) !== Number(currentUserId)) {
+    return res
+      .status(403)
+      .json({ error: "Unauthorized: You can only delete your own posts" });
+  }
+
+  const [deletedPost] = posts.splice(postIndex, 1);
+  comments = comments.filter((c) => c.postId !== deletedPost.id);
+
+  return res.json({
+    success: true,
+    deletedPostId: deletedPost.id,
+    deletedPost: formatPost(deletedPost, currentUserId),
+  });
 });
 
 // POST /api/posts/:id/like
