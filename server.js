@@ -1,11 +1,116 @@
 import express from "express";
 import cors from "cors";
+import path from "path";
+import fs from "fs";
+import { fileURLToPath } from "url";
+import multer from "multer";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// Setup external uploads storage directories
+const UPLOADS_DIR = path.join(__dirname, "uploads");
+const USERS_UPLOAD_DIR = path.join(UPLOADS_DIR, "users");
+const POSTS_UPLOAD_DIR = path.join(UPLOADS_DIR, "posts");
+
+[UPLOADS_DIR, USERS_UPLOAD_DIR, POSTS_UPLOAD_DIR].forEach((dir) => {
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+});
+
 app.use(cors());
 app.use(express.json());
+
+// Serve static uploaded files
+app.use("/uploads", express.static(UPLOADS_DIR));
+
+// ==========================================
+// Rate Limiting Middleware
+// ==========================================
+function createRateLimiter(options = {}) {
+  const windowMs = options.windowMs || 15 * 60 * 1000;
+  const max = options.max || 100;
+  const message = options.message || {
+    error: "Too many requests, please try again later.",
+  };
+
+  const requests = new Map();
+
+  const cleanupInterval = setInterval(() => {
+    const now = Date.now();
+    for (const [key, record] of requests.entries()) {
+      if (now > record.resetTime) {
+        requests.delete(key);
+      }
+    }
+  }, 60 * 1000);
+
+  if (cleanupInterval.unref) {
+    cleanupInterval.unref();
+  }
+
+  return (req, res, next) => {
+    const key =
+      req.ip ||
+      req.headers["x-forwarded-for"] ||
+      req.socket.remoteAddress ||
+      "unknown";
+
+    const now = Date.now();
+    let record = requests.get(key);
+
+    if (!record || now > record.resetTime) {
+      record = {
+        hits: 1,
+        resetTime: now + windowMs,
+      };
+    } else {
+      record.hits += 1;
+    }
+
+    requests.set(key, record);
+
+    const remaining = Math.max(0, max - record.hits);
+    const resetTimeSec = Math.ceil(record.resetTime / 1000);
+
+    res.setHeader("X-RateLimit-Limit", max);
+    res.setHeader("X-RateLimit-Remaining", remaining);
+    res.setHeader("X-RateLimit-Reset", resetTimeSec);
+    res.setHeader("RateLimit-Limit", max);
+    res.setHeader("RateLimit-Remaining", remaining);
+    res.setHeader("RateLimit-Reset", resetTimeSec);
+
+    if (record.hits > max) {
+      const retryAfterSec = Math.ceil((record.resetTime - now) / 1000);
+      res.setHeader("Retry-After", retryAfterSec);
+      return res.status(429).json(message);
+    }
+
+    next();
+  };
+}
+
+const globalRateLimiter = createRateLimiter({
+  windowMs: 60 * 1000,
+  max: 80,
+  message: { error: "Too many requests from this IP, please try again later." },
+});
+
+const authRateLimiter = createRateLimiter({
+  windowMs: 60 * 1000,
+  max: 30,
+  message: {
+    error: "Too many login/registration attempts, please try again later.",
+  },
+});
+
+app.use("/api/", globalRateLimiter);
+app.use("/api/auth/login", authRateLimiter);
+app.use("/api/auth/register", authRateLimiter);
 
 // ==========================================
 // 1. In-Memory Database
@@ -529,6 +634,247 @@ app.delete("/api/users/:id", (req, res) => {
   const [deletedUser] = users.splice(index, 1);
   return res.json({ success: true, deletedUser: sanitizeUser(deletedUser) });
 });
+
+// ==========================================
+// 6. Photo Upload System (Multer & Overwrite by ID)
+// ==========================================
+
+/**
+ * Remove any existing files matching prefix and id in the target directory
+ * so that each post or user profile has exactly one image file, overwriting
+ * previous uploads to save disk storage on the container / VPS.
+ */
+function removeExistingFiles(directory, prefix, id) {
+  try {
+    if (!fs.existsSync(directory)) return;
+    const files = fs.readdirSync(directory);
+    const targetPattern = new RegExp(`^${prefix}-${id}\\.[a-zA-Z0-9]+$`, "i");
+    for (const file of files) {
+      if (targetPattern.test(file)) {
+        fs.unlinkSync(path.join(directory, file));
+      }
+    }
+  } catch (err) {
+    console.error(`Failed to remove existing file for ${prefix}-${id}:`, err);
+  }
+}
+
+// Supported image MIME types
+const ALLOWED_IMAGE_MIMES = [
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+  "image/svg+xml",
+];
+
+const imageFileFilter = (req, file, cb) => {
+  if (ALLOWED_IMAGE_MIMES.includes(file.mimetype.toLowerCase())) {
+    cb(null, true);
+  } else {
+    const err = new Error(
+      "Invalid file type. Only image files (JPG, PNG, GIF, WEBP, SVG) are allowed.",
+    );
+    err.code = "INVALID_IMAGE_TYPE";
+    cb(err, false);
+  }
+};
+
+// Storage engine for user profile pictures
+const userStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, USERS_UPLOAD_DIR);
+  },
+  filename: (req, file, cb) => {
+    const userId = req.params.id;
+    // Clean up any existing image with this user's ID to reduce disk usage
+    removeExistingFiles(USERS_UPLOAD_DIR, "user", userId);
+    const ext = path.extname(file.originalname).toLowerCase() || ".jpg";
+    cb(null, `user-${userId}${ext}`);
+  },
+});
+
+// Storage engine for post photos
+const postStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, POSTS_UPLOAD_DIR);
+  },
+  filename: (req, file, cb) => {
+    const postId = req.params.id;
+    // Clean up any existing image with this post's ID to reduce disk usage
+    removeExistingFiles(POSTS_UPLOAD_DIR, "post", postId);
+    const ext = path.extname(file.originalname).toLowerCase() || ".jpg";
+    cb(null, `post-${postId}${ext}`);
+  },
+});
+
+const uploadUserMulter = multer({
+  storage: userStorage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB max limit
+  fileFilter: imageFileFilter,
+});
+
+const uploadPostMulter = multer({
+  storage: postStorage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB max limit
+  fileFilter: imageFileFilter,
+});
+
+/**
+ * Flexible wrapper accepting common field names ('photo', 'image', 'avatar', 'file')
+ * and providing beginner-friendly JSON error messages.
+ */
+function createUploadMiddleware(multerInstance) {
+  const uploadFields = multerInstance.fields([
+    { name: "photo", maxCount: 1 },
+    { name: "image", maxCount: 1 },
+    { name: "avatar", maxCount: 1 },
+    { name: "file", maxCount: 1 },
+  ]);
+
+  return (req, res, next) => {
+    uploadFields(req, res, (err) => {
+      if (err) {
+        if (err.code === "LIMIT_FILE_SIZE") {
+          return res.status(400).json({
+            error: "File is too large. Maximum allowed size is 5MB.",
+          });
+        }
+        if (err.code === "INVALID_IMAGE_TYPE") {
+          return res.status(400).json({ error: err.message });
+        }
+        return res
+          .status(400)
+          .json({ error: err.message || "File upload failed" });
+      }
+
+      if (req.files) {
+        req.file =
+          req.files.photo?.[0] ||
+          req.files.image?.[0] ||
+          req.files.avatar?.[0] ||
+          req.files.file?.[0];
+      }
+
+      if (!req.file) {
+        return res.status(400).json({
+          error:
+            "No image file uploaded. Please send a file with field name 'photo', 'image', 'avatar', or 'file'.",
+        });
+      }
+
+      next();
+    });
+  };
+}
+
+const handleUserUpload = createUploadMiddleware(uploadUserMulter);
+const handlePostUpload = createUploadMiddleware(uploadPostMulter);
+
+// Validation middlewares ensuring entity exists before upload processing
+const validateUserForUpload = (req, res, next) => {
+  const userId = Number(req.params.id);
+  if (isNaN(userId)) {
+    return res.status(400).json({ error: "Invalid user ID" });
+  }
+  const user = users.find((u) => u.id === userId);
+  if (!user) {
+    return res.status(404).json({ error: "User not found" });
+  }
+  req.targetUser = user;
+  next();
+};
+
+const validatePostForUpload = (req, res, next) => {
+  const postId = Number(req.params.id);
+  if (isNaN(postId)) {
+    return res.status(400).json({ error: "Invalid post ID" });
+  }
+  const post = posts.find((p) => p.id === postId);
+  if (!post) {
+    return res.status(404).json({ error: "Post not found" });
+  }
+  req.targetPost = post;
+  next();
+};
+
+// Route handlers
+const userPhotoUploadHandler = (req, res) => {
+  const user = req.targetUser;
+  const relativeUrl = `/uploads/users/${req.file.filename}`;
+  const fullUrl = `${req.protocol}://${req.get("host")}${relativeUrl}`;
+
+  user.avatarUrl = relativeUrl;
+  user.updatedAt = new Date().toISOString();
+
+  return res.json({
+    message: "User profile photo uploaded successfully",
+    avatarUrl: relativeUrl,
+    fullUrl,
+    filename: req.file.filename,
+    size: req.file.size,
+    user: sanitizeUser(user),
+  });
+};
+
+const postPhotoUploadHandler = (req, res) => {
+  const post = req.targetPost;
+  const relativeUrl = `/uploads/posts/${req.file.filename}`;
+  const fullUrl = `${req.protocol}://${req.get("host")}${relativeUrl}`;
+
+  post.imageUrl = relativeUrl;
+  post.updatedAt = new Date().toISOString();
+
+  return res.json({
+    message: "Post photo uploaded successfully",
+    imageUrl: relativeUrl,
+    fullUrl,
+    filename: req.file.filename,
+    size: req.file.size,
+    post: formatPost(post, CURRENT_USER_ID),
+  });
+};
+
+// User photo upload routes
+app.post(
+  "/api/users/:id/photo",
+  validateUserForUpload,
+  handleUserUpload,
+  userPhotoUploadHandler,
+);
+app.post(
+  "/api/users/:id/avatar",
+  validateUserForUpload,
+  handleUserUpload,
+  userPhotoUploadHandler,
+);
+app.post(
+  "/api/upload/user/:id",
+  validateUserForUpload,
+  handleUserUpload,
+  userPhotoUploadHandler,
+);
+
+// Post photo upload routes
+app.post(
+  "/api/posts/:id/photo",
+  validatePostForUpload,
+  handlePostUpload,
+  postPhotoUploadHandler,
+);
+app.post(
+  "/api/posts/:id/image",
+  validatePostForUpload,
+  handlePostUpload,
+  postPhotoUploadHandler,
+);
+app.post(
+  "/api/upload/post/:id",
+  validatePostForUpload,
+  handlePostUpload,
+  postPhotoUploadHandler,
+);
 
 // ==========================================
 // Start Server

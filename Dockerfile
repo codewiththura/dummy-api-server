@@ -13,6 +13,12 @@ RUN npm ci --only=production
 # Copy the rest of the application code
 COPY . .
 
+# Ensure external uploads directory structure exists inside container
+RUN mkdir -p uploads/users uploads/posts
+
+# Declare persistent volume for image storage on VPS
+VOLUME ["/usr/src/app/uploads"]
+
 # Expose the port the app runs on
 EXPOSE 5000
 
