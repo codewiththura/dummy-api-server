@@ -1,102 +1,388 @@
 # Social App API Server
 
-This is a modular, high-performance Node.js Express API server for the Social Application. It features an in-memory database management system to handle users, authentication, posts (with edit, delete, and private archiving capabilities), post comments, rate-limiting request protection, and a storage-optimized photo upload system designed for beginner testing and containerized VPS deployment.
+A modular, high-performance Node.js & Express mock backend API server designed specifically for **testing, frontend prototyping, mobile app development, and learning**.
+
+This server provides a zero-configuration, in-memory database pre-seeded with realistic dummy data (users, posts, comments), an intelligent **`userId: 1` default fallback mechanism** for friction-free testing without requiring login sessions, rate-limiting protection, and a storage-optimized photo upload system with deterministic ID-based overwriting.
 
 ---
 
-## Features
+## Table of Contents
 
-- **Rate Limiting & Security**:
-  - In-memory rate limiting middleware with sliding window tracking.
-  - Automatic garbage collection to clean up expired IP windows and prevent memory leaks.
-  - Global API rate limit: `80 requests / 1 minute` per IP.
-  - Authentication endpoints limit: `30 requests / 1 minute` per IP.
-  - Injects standard HTTP headers (`RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset`, `Retry-After`).
-  - Returns `429 Too Many Requests` when limits are exceeded.
-- **Authentication System**:
-  - `POST /api/auth/register` - Create a new user account with profile details.
-  - `POST /api/auth/login` - Authenticate an existing user.
-  - `GET /api/auth/me` - Fetch authenticated user details.
-  - `POST /api/auth/logout` - Clear active user session.
-- **Posts Management**:
-  - `GET /api/posts` - Retrieve public post feeds (filters out archived posts by default).
-  - `GET /api/posts?archived=true` - Retrieve user's private archived posts (only accessible to the logged-in owner).
-  - `GET /api/posts/:id` - Fetch details for a specific post.
-  - `POST /api/posts` - Create a new post.
-  - `PUT /api/posts/:id` - Edit post title, body, or image URL (author only).
-  - `POST /api/posts/:id/archive` - Archive or unarchive a post (author only).
-  - `DELETE /api/posts/:id` - Delete a post and its associated comments (author only).
-  - `POST /api/posts/:id/like` - Toggle like status on a post.
-  - `POST /api/posts/:id/save` - Toggle saved status on a post.
-- **Comments System**:
-  - `GET /api/posts/:postId/comments` - Retrieve comments for a post.
-  - `POST /api/posts/:postId/comments` - Add a new comment to a post.
-- **User Management**:
-  - `GET /api/users` - List all user profiles.
-  - `GET /api/users/:id` - Get user profile by ID.
-  - `PUT /api/users/:id` - Update user profile information.
-  - `DELETE /api/users/:id` - Remove a user profile.
-- **Photo Upload System (Storage-Optimized)**:
-  - `POST /api/users/:id/photo` - Upload and update user profile avatar.
-  - `POST /api/posts/:id/photo` - Upload and update post image.
-  - Dedicated external storage directory: `uploads/users/` and `uploads/posts/`.
-  - **Deterministic ID-Based Overwriting**: Uploads for the same user or post overwrite any previous photo for that ID, preventing orphaned files and saving VPS disk space.
-  - Built-in static file serving at `/uploads/*`.
-  - Beginner-friendly multipart handling: accepts field names `photo`, `image`, `avatar`, or `file`.
-  - Robust image validation (JPG, PNG, GIF, WEBP, SVG up to 5MB) with clear JSON error feedback.
+- [Overview & Mock Testing Purpose](#overview--mock-testing-purpose)
+- [Pre-Seeded Dummy Information](#pre-seeded-dummy-information)
+  - [Pre-Seeded Users](#pre-seeded-users)
+  - [Pre-Seeded Posts](#pre-seeded-posts)
+  - [Pre-Seeded Comments](#pre-seeded-comments)
+  - [In-Memory Lifecycle & State Resets](#in-memory-lifecycle--state-resets)
+- [Default User (`userId: 1`) Fallback System](#default-user-userid-1-fallback-system)
+  - [Why Default to User 1?](#why-default-to-user-1)
+  - [Endpoints Utilizing the Fallback](#endpoints-utilizing-the-fallback)
+  - [Authenticating as Another User](#authenticating-as-another-user)
+- [Image Upload & Handling Architecture](#image-upload--handling-architecture)
+  - [Allowed Image MIME Types](#allowed-image-mime-types)
+  - [File Size Limits](#file-size-limits)
+  - [Storage Location & File Naming Convention](#storage-location--file-naming-convention)
+  - [Deterministic ID-Based Overwriting Strategy](#deterministic-id-based-overwriting-strategy)
+  - [Public Upload Access & Entity Validation](#public-upload-access--entity-validation)
+  - [Accepted Multipart Form Field Names](#accepted-multipart-form-field-names)
+  - [Static File Serving & Response Format](#static-file-serving--response-format)
+- [Form Testing & Echo System](#form-testing--echo-system)
+  - [Zero-Validation & Zero-Persistence Model](#zero-validation--zero-persistence-model)
+  - [Supported Content Types & Field Handling](#supported-content-types--field-handling)
+  - [Memory-Safe File Attachments](#memory-safe-file-attachments)
+  - [HTML Visual Inspection Dashboard](#html-visual-inspection-dashboard)
+- [Core Features](#core-features)
+- [Rate Limiting Architecture](#rate-limiting-architecture)
+- [Post Archiving & Security Rules](#post-archiving--security-rules)
+- [Tech Stack](#tech-stack)
+- [Prerequisites](#prerequisites)
+- [Environment Setup & Configuration](#environment-setup--configuration)
+- [Step-by-Step Setup Guide](#step-by-step-setup-guide)
+  - [Running Locally (Development)](#running-locally-development)
+  - [Running with Docker (Containerized on VPS)](#running-with-docker-containerized-on-vps)
+  - [Re-deploying on VPS (Updating Container)](#re-deploying-on-vps-updating-container)
+  - [Deploying via Git Container Registry (GHCR / GitLab)](#deploying-via-git-container-registry-ghcr--gitlab)
+- [Complete API Reference](#complete-api-reference)
+  - [Authentication Endpoints](#authentication-endpoints)
+  - [Posts Endpoints](#posts-endpoints)
+  - [Photo Upload Endpoints](#photo-upload-endpoints)
+  - [Form Testing Endpoints](#form-testing-endpoints)
+  - [Comments Endpoints](#comments-endpoints)
+  - [Users Endpoints](#users-endpoints)
+- [Testing Guide (cURL & Postman)](#testing-guide-curl--postman)
 
 ---
 
-## Photo Upload & Storage Architecture
+## Overview & Mock Testing Purpose
 
-### 1. Directory Structure
+When building frontend user interfaces (e.g., React, Next.js, Vue, Svelte) or mobile applications (React Native, Flutter, Swift, Kotlin), configuring and maintaining a live production database (such as PostgreSQL, MySQL, or MongoDB) introduces unnecessary complexity, migration overhead, and setup friction.
 
-Uploaded assets are stored outside of source files in a dedicated `uploads` directory:
+The **Social App API Server** acts as a lightweight, zero-maintenance mock backend API:
+- **No external database required**: Runs entirely using in-memory JavaScript data structures.
+- **Pre-populated with rich mock data**: Out of the box, the server contains realistic profiles, avatars, feeds, likes, saves, and comments.
+- **Friction-free CRUD & interactions**: Features a built-in default user fallback (`userId: 1`) so developers and QA testers can immediately create, update, delete, like, save, or comment on posts without having to go through a login/token authentication flow first.
+- **Public image upload support**: Clients can test avatar and post photo uploads without complex auth handshakes, with automatic storage management to keep container disk footprints small.
+
+---
+
+## Pre-Seeded Dummy Information
+
+Upon server startup, the in-memory database is automatically populated with the following dummy records:
+
+### Pre-Seeded Users
+
+All pre-seeded test accounts share the default password: **`password123`**.
+
+| ID | Name | Username | Email | Default Avatar | Bio |
+| :---: | :--- | :--- | :--- | :--- | :--- |
+| **1** *(Default)* | Thura | `thura` | `thura@example.com` | `https://i.pravatar.cc/150?img=68` | Passionate React & Node.js Developer. |
+| **2** | May Thin | `maythin` | `maythin@example.com` | `https://i.pravatar.cc/150?u=maythin` | Frontend UI/UX enthusiast and technical writer. |
+| **3** | Zaw Min | `zawmin` | `zawmin@example.com` | `https://i.pravatar.cc/150?u=zawmin` | Fullstack engineer passionate about clean architecture. |
+| **4** | Hla Hla | `hlahla` | `hlahla@example.com` | `https://i.pravatar.cc/150?u=hlahla` | Mobile and Single Page Application enthusiast. |
+| **5** | Kyaw Thu | `kyawthu` | `kyawthu@example.com` | `https://i.pravatar.cc/150?u=kyawthu` | Software Architect & Tech Instructor. |
+| **6** | Su Su | `susu` | `susu@example.com` | `https://i.pravatar.cc/150?u=susu` | React and Next.js Frontend Developer. |
+
+### Pre-Seeded Posts
+
+The initial feed includes 4 educational posts with author linkages, Unsplash cover images, and pre-existing like/save states:
+
+| Post ID | Author | Title | Pre-configured Likes | Initial Saved By |
+| :---: | :---: | :--- | :---: | :---: |
+| **1** | User 1 (Thura) | *Getting Started with React* | 4 likes (Users 2, 3, 4, 5) | User 2 |
+| **2** | User 2 (May Thin) | *Understanding useState Hook* | 3 likes (Users 1, 3, 4) | Users 1, 3 |
+| **3** | User 3 (Zaw Min) | *Props and Component Communication* | 4 likes (Users 1, 2, 4, 6) | User 2 |
+| **4** | User 4 (Hla Hla) | *React Router for Navigation* | 4 likes (Users 1, 2, 3, 5) | Users 1, 5 |
+
+### Pre-Seeded Comments
+
+Post 1 includes initial comments:
+- **Comment 101**: Authored by May Thin (User 2)
+- **Comment 102**: Authored by Zaw Min (User 3)
+
+### In-Memory Lifecycle & State Resets
+
+> [!NOTE]
+> **Data Ephemerality**: Because data is stored in server memory (`let users = [...]`, `let posts = [...]`, `let comments = [...]`), any posts created, edited, liked, or deleted will **reset to initial dummy data whenever the Node process restarts**. Uploaded image files on disk persist independently if the `uploads/` directory is retained or volume-mounted.
+
+---
+
+## Default User (`userId: 1`) Fallback System
+
+### Why Default to User 1?
+
+In traditional backends, every write operation requires a JWT Bearer token or active session cookie. While realistic, this slows down rapid frontend prototyping, UI design iterations, and API exploration in Postman or cURL.
+
+To provide the smoothest developer experience, **this API defaults to `userId: 1` ("Thura") whenever a request is unauthenticated or no user context is supplied**.
+
+### Endpoints Utilizing the Fallback
+
+| Operation | Endpoint | Fallback Behavior when Unauthenticated (`CURRENT_USER_ID === null`) |
+| :--- | :--- | :--- |
+| **Create Post** | `POST /api/posts` | Post author is automatically assigned as `userId: 1`. |
+| **Edit Post** | `PUT /api/posts/:id` | Authorization checks `post.userId === (CURRENT_USER_ID \|\| 1)`, permitting direct edits to Post 1 (owned by User 1). |
+| **Archive Post** | `POST /api/posts/:id/archive` | Authorization checks `post.userId === (CURRENT_USER_ID \|\| 1)`, permitting User 1 to archive/unarchive their posts. |
+| **Delete Post** | `DELETE /api/posts/:id` | Authorization checks `post.userId === (CURRENT_USER_ID \|\| 1)`, permitting User 1 to delete their posts. |
+| **Like / Unlike Post** | `POST /api/posts/:id/like` | Identifies user via `req.body.userId \|\| CURRENT_USER_ID \|\| 1`. Allows unauthenticated clients to toggle likes as User 1, or pass any custom `userId` in the body. |
+| **Save / Unsave Post** | `POST /api/posts/:id/save` | Identifies user via `req.body.userId \|\| CURRENT_USER_ID \|\| 1`. Allows unauthenticated clients to toggle saves as User 1. |
+| **Add Comment** | `POST /api/posts/:postId/comments` | Assigns comment `userId: CURRENT_USER_ID \|\| 1`. If `name` or `email` are omitted in the body, it auto-fills with User 1's profile details (`"Thura"`, `"thura@example.com"`). |
+
+### Authenticating as Another User
+
+If you want to simulate multi-user behavior or test permissions:
+1. Call `POST /api/auth/login` with `{ "email": "maythin@example.com", "password": "password123" }`.
+2. The server sets `CURRENT_USER_ID = 2`.
+3. All subsequent requests will now act on behalf of User 2 (May Thin) until `POST /api/auth/logout` is called, which resets `CURRENT_USER_ID = null` (reverting back to the default `userId: 1` fallback).
+
+---
+
+## Image Upload & Handling Architecture
+
+The server incorporates an image upload subsystem powered by [Multer](https://github.com/expressjs/multer) with custom storage engines, strict MIME validation, file size limits, and disk-space optimization.
+
+### Allowed Image MIME Types
+
+To maintain security and prevent arbitrary file uploads, only standard image formats are permitted:
+
+| MIME Type | Supported File Extensions | Category | Status |
+| :--- | :--- | :--- | :---: |
+| `image/jpeg` | `.jpg`, `.jpeg` | JPEG Image | Allowed |
+| `image/jpg` | `.jpg` | JPEG Image (variant) | Allowed |
+| `image/png` | `.png` | Portable Network Graphics | Allowed |
+| `image/gif` | `.gif` | Graphics Interchange Format | Allowed |
+| `image/webp` | `.webp` | WebP Modern Image Format | Allowed |
+| `image/svg+xml` | `.svg` | Scalable Vector Graphics | Allowed |
+
+> [!WARNING]
+> **MIME Type Enforcement**: Any upload with an unlisted MIME type (e.g., `application/pdf`, `video/mp4`, `text/plain`, `application/zip`) is immediately rejected with HTTP status **`400 Bad Request`**:
+> ```json
+> {
+>   "error": "Invalid file type. Only image files (JPG, PNG, GIF, WEBP, SVG) are allowed."
+> }
+> ```
+
+### File Size Limits
+
+- **Maximum Allowed File Size**: **`5 MB`** (`5 * 1024 * 1024` bytes).
+- Files exceeding 5 MB are rejected by the Multer size limiter with HTTP status **`400 Bad Request`**:
+  ```json
+  {
+    "error": "File is too large. Maximum allowed size is 5MB."
+  }
+  ```
+
+### Storage Location & File Naming Convention
+
+Uploaded files are stored outside the source code tree in a dedicated `uploads` directory:
 
 ```text
 social-app-api-server/
 ├── uploads/
-│   ├── users/
+│   ├── users/            <-- User profile avatars
 │   │   ├── user-1.jpg
 │   │   └── user-2.png
-│   └── posts/
+│   └── posts/            <-- Post cover images
 │       ├── post-1.jpg
 │       └── post-2.webp
 ```
 
-### 2. ID-Based Overwriting Strategy
+- **User Profile Avatars**: Saved as `uploads/users/user-<userId>.<ext>`
+- **Post Photos**: Saved as `uploads/posts/post-<postId>.<ext>`
 
-To prevent disk saturation when running in containerized or VPS environments with limited storage:
-- User profile avatars are saved as `user-<userId>.<ext>`.
-- Post images are saved as `post-<postId>.<ext>`.
-- Whenever a new photo is uploaded for the same ID, any existing image file matching `<prefix>-<id>.*` in that directory is automatically removed before writing the new image.
-- This ensures **zero orphaned files** even if the file extension changes (e.g. replacing a `.png` with a `.jpg`).
+### Deterministic ID-Based Overwriting Strategy
 
-### 3. Static File Access
+On resource-constrained environments (such as low-cost VPS instances or containerized nodes), user photo uploads can rapidly consume disk storage with abandoned, orphaned files.
 
-Uploaded files are served statically by Express:
-- URL Pattern: `http://<server-address>:5000/uploads/users/user-<id>.<ext>`
-- URL Pattern: `http://<server-address>:5000/uploads/posts/post-<id>.<ext>`
-- Both relative URLs (`/uploads/...`) and full URLs (`http://.../uploads/...`) are returned in the upload responses for flexibility in frontend consumption.
+To solve this:
+1. When a new photo is uploaded for entity ID `X`, the helper function `removeExistingFiles()` searches the destination folder for any file matching the pattern:
+   ```regex
+   ^<prefix>-<id>\.[a-zA-Z0-9]+$
+   ```
+2. Any matching existing file (e.g., `user-1.png`) is unlinked and deleted from disk before the new file (e.g., `user-1.jpg`) is written.
+3. **Zero Orphaned Files**: Even if a user updates their picture from a PNG to a JPG or WEBP, the old format is deleted, guaranteeing exactly one image file per user ID and post ID on disk at all times.
 
-### 4. Beginner-Friendly Upload Parsing
+### Public Upload Access & Entity Validation
 
-Beginners testing with tools like Postman, Thunder Client, or cURL often encounter errors when the form field name doesn't match the server's expectation. The upload middleware automatically accepts any of the following multipart form field keys:
+- **Is Public Upload Allowed?**: **Yes**. Because this server is tailored for frontend testing and sandbox experimentation, upload endpoints do **not** require authentication headers, tokens, or cookies. Any client, frontend application, or Postman tester can upload photos.
+- **Entity Existence Validation Guard**:
+  Before saving any file to disk, the server checks whether the target entity actually exists:
+  - If `:id` is not a valid number: Returns `400 Bad Request` (`{"error": "Invalid user ID"}` or `{"error": "Invalid post ID"}`).
+  - If the user or post is not found in memory: Returns `404 Not Found` (`{"error": "User not found"}` or `{"error": "Post not found"}`).
+  - Only if the entity is validated does Multer process and save the file.
+
+### Accepted Multipart Form Field Names
+
+To eliminate frustration when switching between HTTP clients or frontend libraries, the upload middleware accepts any of the following multipart form field keys:
 - `photo`
 - `image`
 - `avatar`
 - `file`
 
+If no file is attached under one of these keys, the server returns:
+```json
+{
+  "error": "No image file uploaded. Please send a file with field name 'photo', 'image', 'avatar', or 'file'."
+}
+```
+
+### Static File Serving & Response Format
+
+All uploads are served statically by Express under the `/uploads` route:
+- User Avatars: `http://<host>:5000/uploads/users/user-<id>.<ext>`
+- Post Images: `http://<host>:5000/uploads/posts/post-<id>.<ext>`
+
+When an upload succeeds, the server returns both relative and absolute URLs alongside entity metadata:
+```json
+{
+  "message": "User profile photo uploaded successfully",
+  "avatarUrl": "/uploads/users/user-1.jpg",
+  "fullUrl": "http://localhost:5000/uploads/users/user-1.jpg",
+  "filename": "user-1.jpg",
+  "size": 45210,
+  "user": {
+    "id": 1,
+    "name": "Thura",
+    "avatarUrl": "/uploads/users/user-1.jpg",
+    "updatedAt": "2026-10-18T12:00:00.000Z"
+  }
+}
+```
+
+---
+
+## Form Testing & Echo System
+
+Building forms in web and mobile applications often requires verifying that input fields, checkboxes, select menus, arrays, nested keys, and file attachments are sent correctly by the client. However, typical API endpoints enforce strict schema validation, require authenticated user sessions, and write data into databases.
+
+To provide a dedicated sandbox for form testing, the server includes dedicated form testing endpoints:
+- `POST /api/forms/submit` (primary)
+- `POST /api/forms/test` (alias)
+- `POST /api/form-submit` (alias)
+
+### Zero-Validation & Zero-Persistence Model
+
+- **No Authentication Required**: Form test routes are completely public and accessible without tokens, cookies, or headers.
+- **No Schema Validation**: Submit any arbitrary fields, names, or values. The server will not reject requests for missing or unexpected fields.
+- **No Data Persistence**: **The server does NOT save the submitted data to the database or files to disk.** It acts as an inspection mirror (echo server) that parses the payload and sends a structured report back to the tester.
+
+### Supported Content Types & Field Handling
+
+The route automatically detects and parses all standard HTML and JavaScript form submission formats:
+
+| Content-Type | Client Method | Field Types Handled |
+| :--- | :--- | :--- |
+| **`application/x-www-form-urlencoded`** | Raw HTML `<form method="POST">` | Text inputs, passwords, numbers, radios, checkboxes (`"on"`/`"true"`), arrays (`tags[]`), nested objects (`profile[bio]`). |
+| **`application/json`** | JS `fetch()`, `axios`, Postman | Strings, numbers, booleans, nested objects, and arrays. |
+| **`multipart/form-data`** | `<form enctype="multipart/form-data">` or `new FormData()` | Text fields alongside file attachments. |
+| **URL Query Parameters** | `<form method="GET">` or query strings | Parsed from `req.query` if request body is empty. |
+
+### Memory-Safe File Attachments
+
+When testing file inputs (`<input type="file">`):
+- Uploaded files are processed in-memory using `multer.memoryStorage()`.
+- **Zero Disk Footprint**: Files are **never written to disk**, preventing VPS or test server disk exhaustion.
+- **Limits**: Up to **10 files** per submission, max **10 MB** per file.
+- The response returns rich file metadata: `fieldName`, `originalName`, `mimeType`, `sizeBytes`, and human-readable `formattedSize`.
+
+### Standard Echo Response (JSON)
+
+By default, the server returns a clean JSON inspection response:
+
+```json
+{
+  "success": true,
+  "message": "Form submission received successfully. (Echo test mode: Data is not saved)",
+  "receivedAt": "2026-10-18T12:40:00.000Z",
+  "method": "POST",
+  "contentType": "application/x-www-form-urlencoded",
+  "fieldsCount": 4,
+  "fields": {
+    "username": "alex_tester",
+    "email": "alex@example.com",
+    "newsletter": "true",
+    "role": "frontend-dev"
+  },
+  "filesCount": 1,
+  "files": [
+    {
+      "fieldName": "resume",
+      "originalName": "developer-cv.pdf",
+      "mimeType": "application/pdf",
+      "sizeBytes": 24576,
+      "formattedSize": "24 KB"
+    }
+  ]
+}
+```
+
+### HTML Visual Inspection Dashboard
+
+If testers are submitting directly from a raw HTML form in a web browser without JavaScript, they can append **`?format=html`** to the form's `action` attribute:
+
+```html
+<form action="http://localhost:5000/api/forms/submit?format=html" method="POST" enctype="multipart/form-data">
+  <!-- fields -->
+</form>
+```
+
+When submitted, the browser will render a sleek, responsive visual report containing:
+- Badges and metadata overview (HTTP method, content type, timestamp)
+- Formatted table of all submitted text and input fields with detected types
+- Formatted table of attached files with original names, MIME types, and sizes
+- Formatted raw JSON payload block
+
+---
+
+## Core Features
+
+- **Rate Limiting & DoS Protection**:
+  - Sliding window rate limiting with background garbage collection.
+  - Global API: `80 requests / 1 minute` per IP.
+  - Auth Endpoints: `30 requests / 1 minute` per IP.
+  - Standard headers returned: `RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset`, `Retry-After`.
+- **Authentication Simulation**:
+  - `POST /api/auth/register` - Create test account.
+  - `POST /api/auth/login` - Authenticate test account.
+  - `GET /api/auth/me` - Fetch currently logged-in user.
+  - `POST /api/auth/logout` - Clear active user session (reverts to `userId: 1` default).
+- **Post Feed & Management**:
+  - `GET /api/posts` - Retrieve public active posts feed.
+  - `GET /api/posts?userId=X` - Filter posts authored by a specific user.
+  - `GET /api/posts?archived=true` - Retrieve user's private archived posts (author-only).
+  - `GET /api/posts/:id` - Fetch post details.
+  - `POST /api/posts` - Create post (defaults author to `userId: 1` if unauthenticated).
+  - `PUT /api/posts/:id` - Edit post title, body, or image (author only, defaults to user 1).
+  - `POST /api/posts/:id/archive` - Toggle post archive visibility.
+  - `DELETE /api/posts/:id` - Delete post and its attached comments.
+  - `POST /api/posts/:id/like` - Toggle post like status (supports `userId` in body or defaults to 1).
+  - `POST /api/posts/:id/save` - Toggle post save status (supports `userId` in body or defaults to 1).
+- **Comments Subsystem**:
+  - `GET /api/posts/:postId/comments` - Fetch all comments on a post.
+  - `POST /api/posts/:postId/comments` - Create comment (defaults author to `userId: 1`).
+- **User Directory**:
+  - `GET /api/users` - List all mock user profiles.
+  - `GET /api/users/:id` - Get user profile details.
+  - `PUT /api/users/:id` - Update user bio, avatar, or details.
+  - `DELETE /api/users/:id` - Remove a user profile.
+- **Photo Upload System**:
+  - `POST /api/users/:id/photo` (aliases: `/api/users/:id/avatar`, `/api/upload/user/:id`)
+  - `POST /api/posts/:id/photo` (aliases: `/api/posts/:id/image`, `/api/upload/post/:id`)
+- **Form Testing & Echo System**:
+  - `POST /api/forms/submit` (aliases: `/api/forms/test`, `/api/form-submit`)
+  - Universal parsing: handles URL-encoded, JSON, and multipart form submissions with file attachments.
+  - Zero-persistence echo mode: returns parsed fields and file metadata for testing without saving to database or disk.
+  - Optional visual inspection report via `?format=html`.
+
 ---
 
 ## Rate Limiting Architecture
 
-| Limiter Scope | Target Endpoints | Window Duration | Max Requests | Exceedance Response |
-| :--- | :--- | :--- | :--- | :--- |
-| **Global Limiter** | `/api/*` | 1 minute (60,000 ms) | 80 requests / IP | `429 Too Many Requests` |
-| **Auth Limiter** | `/api/auth/login`, `/api/auth/register` | 1 minute (60,000 ms) | 30 requests / IP | `429 Too Many Requests` |
+| Limiter Scope | Target Endpoints | Window Duration | Max Requests | Limit Exceeded Status |
+| :--- | :--- | :--- | :---: | :--- |
+| **Global Limiter** | `/api/*` | 1 minute (60,000 ms) | 80 / IP | `429 Too Many Requests` |
+| **Auth Limiter** | `/api/auth/login`, `/api/auth/register` | 1 minute (60,000 ms) | 30 / IP | `429 Too Many Requests` |
 
-### HTTP Headers Returned:
+### HTTP Headers Returned
+
 - `RateLimit-Limit` / `X-RateLimit-Limit`: Maximum requests allowed per window.
 - `RateLimit-Remaining` / `X-RateLimit-Remaining`: Remaining requests in current window.
 - `RateLimit-Reset` / `X-RateLimit-Reset`: UNIX epoch timestamp (seconds) when window resets.
@@ -107,45 +393,45 @@ Beginners testing with tools like Postman, Thunder Client, or cURL often encount
 ## Post Archiving & Security Rules
 
 1. **Owner-Only Modifications**:
-   - Only the post creator (`post.userId === CURRENT_USER_ID`) can perform `PUT /api/posts/:id` (Edit), `POST /api/posts/:id/archive` (Archive), and `DELETE /api/posts/:id` (Delete).
-   - Attempts by unauthorized users will return `403 Forbidden`.
+   - Only the post creator (`post.userId === CURRENT_USER_ID`, or `post.userId === 1` if unauthenticated) can perform `PUT /api/posts/:id` (Edit), `POST /api/posts/:id/archive` (Archive), and `DELETE /api/posts/:id` (Delete).
+   - Unauthorized attempts return `403 Forbidden`.
 2. **Private Archive Visibility**:
-   - Archived posts (`isArchived: true`) are strictly hidden from general post feeds (`GET /api/posts`).
-   - Querying `GET /api/posts?archived=true` will only return the archived posts belonging to the requesting logged-in user.
-   - Accessing `GET /api/posts/:id` directly for an archived post by anyone other than the author will yield `403 Forbidden`.
+   - Archived posts (`isArchived: true`) are excluded from general feeds (`GET /api/posts`).
+   - Querying `GET /api/posts?archived=true` only returns archived posts belonging to the requesting user.
+   - Accessing `GET /api/posts/:id` directly for an archived post by anyone other than the author yields `403 Forbidden`.
 
 ---
 
-## Tech Stack & Architecture
+## Tech Stack
 
-- **Runtime**: Node.js (ES Modules)
-- **Framework**: Express.js (v5)
-- **File Upload**: Multer (v2) with custom disk storage and ID overwrite logic
-- **Middleware**: CORS, JSON Body Parser, Custom In-Memory Rate Limiter, Static File Serving
+- **Runtime**: Node.js (ES Modules `type: "module"`)
+- **Web Framework**: Express.js (v5)
+- **Multipart Upload**: Multer (v2) with custom disk storage and ID overwrite logic
+- **Middleware**: CORS, Express JSON Body Parser, Custom Rate Limiter, Static File Serving
 
 ---
 
 ## Prerequisites
 
-- **Node.js** (v18+ recommended)
-- **npm** (v9+ recommended)
-- **Docker** (Optional, for containerized deployment on VPS)
+- **Node.js**: v18.0.0 or higher (v20+ recommended)
+- **npm**: v9.0.0 or higher
+- **Docker**: (Optional) For containerized VPS deployment
 
 ---
 
 ## Environment Setup & Configuration
 
-- **Default Port**: `5000` (Configured via `PORT` environment variable or defaults to 5000 in `server.js`)
-- **CORS**: Enabled by default for all cross-origin requests.
-- **Upload Directory**: Created automatically at `./uploads/users` and `./uploads/posts` if not present.
+- **`PORT`**: Port number for HTTP server (default: `5000`).
+- **CORS**: Enabled for all origins by default for easy cross-origin frontend testing.
+- **Upload Directories**: `./uploads/users` and `./uploads/posts` are automatically verified and created on startup.
 
 ---
 
-## Step-by-Step Guide
+## Step-by-Step Setup Guide
 
 ### Running Locally (Development)
 
-1. Clone or navigate to the server repository directory:
+1. Clone or navigate to the repository directory:
    ```bash
    cd social-app-api-server
    ```
@@ -162,9 +448,18 @@ Beginners testing with tools like Postman, Thunder Client, or cURL often encount
 
 4. The server will start and listen at `http://localhost:5000`.
 
-### Running with Docker (Production / Containerized on VPS)
+### Running Automated Tests
 
-1. Build the Docker container image:
+Run the native Node test runner to validate API endpoints, dummy seed data, unauthenticated `userId: 1` fallback, and image upload validation:
+```bash
+npm test
+```
+
+---
+
+### Running with Docker (Containerized on VPS)
+
+1. Build the Docker image:
    ```bash
    docker build -t social-app-api .
    ```
@@ -179,8 +474,8 @@ Beginners testing with tools like Postman, Thunder Client, or cURL often encount
      social-app-api
    ```
 
-   > **Why use `-v $(pwd)/uploads:/usr/src/app/uploads` on VPS?**
-   > By default, container file systems are ephemeral. Binding the host's `uploads` directory to `/usr/src/app/uploads` inside the container guarantees that uploaded photos are permanently persisted across container restarts, updates, and rebuilds on your VPS.
+   > [!IMPORTANT]
+   > **Volume Binding**: Binding `$(pwd)/uploads` on the host to `/usr/src/app/uploads` inside the container guarantees uploaded images survive container restarts and updates.
 
 3. Verify container status:
    ```bash
@@ -188,92 +483,61 @@ Beginners testing with tools like Postman, Thunder Client, or cURL often encount
    docker logs -f social-app-api-container
    ```
 
-### Re-deploying on VPS (Updating an Existing Container)
+---
 
-When updating your code, `Dockerfile`, or dependencies (like `multer`):
+### Re-deploying on VPS (Updating Container)
 
-1. **Pull the latest changes on your VPS**:
-   ```bash
-   cd /path/to/social-app-api-server
-   git pull origin main
-   ```
+When pulling newer code or Docker updates:
 
-2. **Re-build the Docker image with no cache to ensure fresh dependencies**:
-   ```bash
-   docker build -t social-app-api .
-   ```
-
-3. **Gracefully stop and remove the old running container**:
-   ```bash
-   docker stop social-app-api-container
-   docker rm social-app-api-container
-   ```
-   *(Don't worry: your uploaded photos remain safe on the VPS host in `./uploads`!)*
-
-4. **Start the new container with the persistent uploads volume**:
-   ```bash
-   docker run -d \
-     --name social-app-api-container \
-     -p 5000:5000 \
-     -v $(pwd)/uploads:/usr/src/app/uploads \
-     --restart unless-stopped \
-     social-app-api
-   ```
-
-5. **Verify live server logs**:
-   ```bash
-   docker logs -f --tail 50 social-app-api-container
-   ```
-
-6. **(Optional) Clean up dangling Docker images to free up VPS disk space**:
-   ```bash
-   docker image prune -f
-   ```
-
-### Deploying via Git Container Registry (GitHub Packages / GHCR / GitLab Registry)
-
-If you build the Docker image and host it on a Git container registry (such as GitHub Container Registry `ghcr.io` or GitLab Registry `registry.gitlab.com`), follow this streamlined deployment workflow:
-
-#### 1. Build and Push from Local / CI:
 ```bash
-# Define your registry image tag (e.g. GitHub Container Registry)
+# 1. Pull latest code
+git pull origin main
+
+# 2. Rebuild the image
+docker build -t social-app-api .
+
+# 3. Stop and replace the container
+docker stop social-app-api-container
+docker rm social-app-api-container
+
+# 4. Restart container with uploads volume preserved
+docker run -d \
+  --name social-app-api-container \
+  -p 5000:5000 \
+  -v $(pwd)/uploads:/usr/src/app/uploads \
+  --restart unless-stopped \
+  social-app-api
+```
+
+---
+
+### Deploying via Git Container Registry (GHCR / GitLab)
+
+#### 1. Build and Push Image:
+```bash
 IMAGE_NAME="ghcr.io/<YOUR_GITHUB_USERNAME>/social-app-api:latest"
 
-# Build image locally
 docker build -t $IMAGE_NAME .
-
-# Login to Git image host (if not already logged in)
 echo $GITHUB_TOKEN | docker login ghcr.io -u <YOUR_GITHUB_USERNAME> --password-stdin
-
-# Push image to the Git registry
 docker push $IMAGE_NAME
 ```
 
-#### 2. Pull and Deploy on VPS:
-Connect to your VPS via SSH and run:
+#### 2. Pull and Run on VPS:
 ```bash
 IMAGE_NAME="ghcr.io/<YOUR_GITHUB_USERNAME>/social-app-api:latest"
 
-# 1. Pull the new image from Git registry host
 docker pull $IMAGE_NAME
-
-# 2. Ensure host uploads folder exists for persistence
 mkdir -p uploads/users uploads/posts
 
-# 3. Stop and remove the old running container
 docker stop social-app-api-container || true
 docker rm social-app-api-container || true
 
-# 4. Run the updated container with volume bind-mount for uploads
 docker run -d \
   --name social-app-api-container \
   -p 5000:5000 \
   -v $(pwd)/uploads:/usr/src/app/uploads \
   --restart unless-stopped \
   $IMAGE_NAME
-
-# 5. Clean up old untagged images to conserve VPS disk storage
-docker image prune -f
 ```
 
 ---
@@ -282,60 +546,101 @@ docker image prune -f
 
 ### Authentication Endpoints
 
-| Method | Endpoint | Authorization | Rate Limit | Description |
-| :--- | :--- | :--- | :--- | :--- |
-| `POST` | `/api/auth/register` | Public | 30 / 1 min | Register new user account |
-| `POST` | `/api/auth/login` | Public | 30 / 1 min | Log in user account |
-| `GET` | `/api/auth/me` | Authenticated | 80 / 1 min | Fetch authenticated user info |
-| `POST` | `/api/auth/logout` | Authenticated | 80 / 1 min | Log out active user session |
+| Method | Endpoint | Access | Rate Limit | Description |
+| :--- | :--- | :--- | :---: | :--- |
+| `POST` | `/api/auth/register` | Public | 30 / min | Register new user account |
+| `POST` | `/api/auth/login` | Public | 30 / min | Log in user account (sets `CURRENT_USER_ID`) |
+| `GET` | `/api/auth/me` | Logged In | 80 / min | Fetch active user info (401 if unauthenticated) |
+| `POST` | `/api/auth/logout` | Logged In | 80 / min | Log out (reverts active user to `null`, fallback `userId: 1`) |
 
 ### Posts Endpoints
 
-| Method | Endpoint | Authorization | Rate Limit | Description |
+| Method | Endpoint | Access | Fallback / Auth Rule | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| `GET` | `/api/posts` | Public | 80 / 1 min | List all active posts (supports `?userId=X`) |
-| `GET` | `/api/posts?archived=true` | Authenticated | 80 / 1 min | List current user's archived posts |
-| `GET` | `/api/posts/:id` | Public / Author | 80 / 1 min | Get post details (403 if archived by another user) |
-| `POST` | `/api/posts` | Authenticated | 80 / 1 min | Create a new post (`{ "title": "...", "body": "..." }`) |
-| `PUT` | `/api/posts/:id` | Author Only | 80 / 1 min | Update post details (`{ "title": "...", "body": "..." }`) |
-| `POST` | `/api/posts/:id/archive` | Author Only | 80 / 1 min | Toggle or set post archive status |
-| `DELETE` | `/api/posts/:id` | Author Only | 80 / 1 min | Delete post and associated comments |
-| `POST` | `/api/posts/:id/like` | Public | 80 / 1 min | Toggle post like status |
-| `POST` | `/api/posts/:id/save` | Public | 80 / 1 min | Toggle post save status |
+| `GET` | `/api/posts` | Public | None | List all active posts (supports `?userId=X`) |
+| `GET` | `/api/posts?archived=true` | Logged In | Author Only | List user's private archived posts |
+| `GET` | `/api/posts/:id` | Public | Author if archived | Get post details (403 if archived by another user) |
+| `POST` | `/api/posts` | Public | Defaults to `userId: 1` | Create new post (`{ "title": "...", "body": "..." }`) |
+| `PUT` | `/api/posts/:id` | Author | Defaults to `userId: 1` | Update post (`{ "title": "...", "body": "..." }`) |
+| `POST` | `/api/posts/:id/archive` | Author | Defaults to `userId: 1` | Toggle or set archive status (`{ "isArchived": true }`) |
+| `DELETE` | `/api/posts/:id` | Author | Defaults to `userId: 1` | Delete post and attached comments |
+| `POST` | `/api/posts/:id/like` | Public | `req.body.userId \|\| 1` | Toggle like status on post |
+| `POST` | `/api/posts/:id/save` | Public | `req.body.userId \|\| 1` | Toggle save status on post |
 
 ### Photo Upload Endpoints
 
-| Method | Endpoint | Aliases | Form Field Names | Description |
-| :--- | :--- | :--- | :--- | :--- |
-| `POST` | `/api/users/:id/photo` | `/api/users/:id/avatar`, `/api/upload/user/:id` | `photo`, `image`, `avatar`, `file` | Upload and set profile avatar for user `:id` (overwrites previous) |
-| `POST` | `/api/posts/:id/photo` | `/api/posts/:id/image`, `/api/upload/post/:id` | `photo`, `image`, `file` | Upload and set photo for post `:id` (overwrites previous) |
+| Method | Endpoint | Aliases | Form Field Names | Allowed Formats | Size Limit | Description |
+| :--- | :--- | :--- | :--- | :--- | :---: | :--- |
+| `POST` | `/api/users/:id/photo` | `/api/users/:id/avatar`, `/api/upload/user/:id` | `photo`, `image`, `avatar`, `file` | JPG, PNG, GIF, WEBP, SVG | 5 MB | Upload profile avatar for user `:id` (overwrites previous) |
+| `POST` | `/api/posts/:id/photo` | `/api/posts/:id/image`, `/api/upload/post/:id` | `photo`, `image`, `avatar`, `file` | JPG, PNG, GIF, WEBP, SVG | 5 MB | Upload image for post `:id` (overwrites previous) |
+
+### Form Testing Endpoints
+
+| Method | Endpoint | Aliases | Accepted Encodings | Auth / Validation | Description |
+| :--- | :--- | :--- | :--- | :---: | :--- |
+| `POST` / `GET` / `PUT` / `PATCH` | `/api/forms/submit` | `/api/forms/test`, `/api/form-submit` | `urlencoded`, `json`, `multipart/form-data` | None (Echo Only) | Parses all HTML input fields and memory-safe files, returning submitted fields without saving to database. Supports `?format=html` for in-browser visual inspection. |
 
 ### Comments Endpoints
 
-| Method | Endpoint | Authorization | Rate Limit | Description |
+| Method | Endpoint | Access | Fallback / Auth Rule | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| `GET` | `/api/posts/:postId/comments` | Public | 80 / 1 min | List comments for a post |
-| `POST` | `/api/posts/:postId/comments` | Public | 80 / 1 min | Create comment on post (`{ "body": "..." }`) |
+| `GET` | `/api/posts/:postId/comments` | Public | None | List comments for a post |
+| `POST` | `/api/posts/:postId/comments` | Public | Defaults to `userId: 1` | Create comment on post (`{ "body": "..." }`) |
 
 ### Users Endpoints
 
-| Method | Endpoint | Authorization | Rate Limit | Description |
-| :--- | :--- | :--- | :--- | :--- |
-| `GET` | `/api/users` | Public | 80 / 1 min | List all users |
-| `GET` | `/api/users/:id` | Public | 80 / 1 min | Get user profile by ID |
-| `PUT` | `/api/users/:id` | Public | 80 / 1 min | Update user profile |
-| `DELETE` | `/api/users/:id` | Public | 80 / 1 min | Delete user profile |
+| Method | Endpoint | Access | Description |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/users` | Public | List all mock user profiles (passwords omitted) |
+| `GET` | `/api/users/:id` | Public | Get user profile by ID |
+| `PUT` | `/api/users/:id` | Public | Update user profile fields (bio, name, avatarUrl) |
+| `DELETE` | `/api/users/:id` | Public | Delete user profile from in-memory database |
 
 ---
 
-## Beginner Testing Guide (cURL & Postman)
+## Testing Guide (cURL & Postman)
 
-### 1. Upload User Profile Photo
+### 1. Creating a Post Without Logging In (Verifying `userId: 1` Default)
+
+```bash
+curl -X POST http://localhost:5000/api/posts \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "Exploring Node.js Mock Server",
+    "body": "Testing post creation without an authentication token!"
+  }'
+```
+
+Response:
+```json
+{
+  "id": 1729234567890,
+  "userId": 1,
+  "title": "Exploring Node.js Mock Server",
+  "body": "Testing post creation without an authentication token!",
+  "imageUrl": "https://picsum.photos/seed/1729234567890/600/350",
+  "likes": [],
+  "likesCount": 0,
+  "savedBy": [],
+  "isSaved": false,
+  "isArchived": false,
+  "author": {
+    "id": 1,
+    "name": "Thura",
+    "username": "thura",
+    "avatarUrl": "https://i.pravatar.cc/150?img=68"
+  }
+}
+```
+
+---
+
+### 2. Uploading a User Profile Photo
 
 Using **cURL**:
 ```bash
 curl -X POST http://localhost:5000/api/users/1/photo \
-  -F "photo=@/path/to/profile.jpg"
+  -F "photo=@/path/to/avatar.jpg"
 ```
 
 Response:
@@ -349,25 +654,31 @@ Response:
   "user": {
     "id": 1,
     "name": "Thura",
+    "username": "thura",
+    "email": "thura@example.com",
     "avatarUrl": "/uploads/users/user-1.jpg",
-    "updatedAt": "2026-09-03T15:30:00.000Z"
+    "bio": "Passionate React & Node.js Developer.",
+    "updatedAt": "2026-10-18T12:30:00.000Z"
   }
 }
 ```
 
-In **Postman**:
-1. Select method **POST** and enter `http://localhost:5000/api/users/1/photo`.
-2. Navigate to the **Body** tab and choose **form-data**.
-3. In the KEY column, type `photo` (or `avatar` or `image`) and change the dropdown from *Text* to *File*.
-4. In the VALUE column, select your image file.
-5. Click **Send**.
+Using **Postman**:
+1. Method: `POST`
+2. URL: `http://localhost:5000/api/users/1/photo`
+3. Body: Select `form-data`
+4. Key: Type `photo` (or `avatar` or `image`), set type dropdown to **File**
+5. Value: Choose an image (JPG, PNG, GIF, WEBP, or SVG under 5MB)
+6. Send request.
 
-### 2. Upload Post Photo
+---
+
+### 3. Uploading a Post Photo
 
 Using **cURL**:
 ```bash
 curl -X POST http://localhost:5000/api/posts/1/photo \
-  -F "photo=@/path/to/post_image.png"
+  -F "image=@/path/to/cover.png"
 ```
 
 Response:
@@ -380,15 +691,212 @@ Response:
   "size": 89124,
   "post": {
     "id": 1,
+    "userId": 1,
     "title": "Getting Started with React",
     "imageUrl": "/uploads/posts/post-1.png",
-    "updatedAt": "2026-09-03T15:30:00.000Z"
+    "updatedAt": "2026-10-18T12:35:00.000Z"
   }
 }
 ```
 
-### 3. Verify Automatic Overwriting
+---
 
-1. Upload `avatar.jpg` for user 1. Check directory `uploads/users/` — `user-1.jpg` exists.
-2. Upload `avatar.png` for user 1. Check directory `uploads/users/` — `user-1.jpg` is removed and replaced with `user-1.png`.
-3. Storage remains clean with only one image per user/post.
+### 4. Testing Upload Error Scenarios
+
+#### Testing Invalid File Type (e.g. uploading a `.pdf` or `.txt` file):
+```bash
+curl -X POST http://localhost:5000/api/users/1/photo \
+  -F "photo=@/path/to/document.pdf"
+```
+
+Response (`400 Bad Request`):
+```json
+{
+  "error": "Invalid file type. Only image files (JPG, PNG, GIF, WEBP, SVG) are allowed."
+}
+```
+
+#### Testing File Size Exceeded (> 5 MB):
+```bash
+curl -X POST http://localhost:5000/api/users/1/photo \
+  -F "photo=@/path/to/large_image_8mb.jpg"
+```
+
+Response (`400 Bad Request`):
+```json
+{
+  "error": "File is too large. Maximum allowed size is 5MB."
+}
+```
+
+#### Testing Non-Existent User or Post ID:
+```bash
+curl -X POST http://localhost:5000/api/users/9999/photo \
+  -F "photo=@/path/to/avatar.jpg"
+```
+
+Response (`404 Not Found`):
+```json
+{
+  "error": "User not found"
+}
+```
+
+---
+
+### 5. Verifying Deterministic ID Overwrite
+
+1. Upload `avatar.jpg` for User 1:
+   - Check `./uploads/users/` — `user-1.jpg` is created.
+2. Upload `avatar.webp` for User 1:
+   - Check `./uploads/users/` — `user-1.jpg` is automatically unlinked and replaced with `user-1.webp`.
+3. Disk space remains lean with exactly one image per ID.
+
+---
+
+### 6. Testing Raw HTML Forms (`application/x-www-form-urlencoded`)
+
+Use a standard raw HTML `<form>` to test text fields, radios, checkboxes, and select menus:
+
+```html
+<form action="http://localhost:5000/api/forms/submit" method="POST">
+  <label>Username: <input type="text" name="username" value="johndoe" /></label><br>
+  <label>Email: <input type="email" name="email" value="john@example.com" /></label><br>
+  <label>Role:
+    <select name="role">
+      <option value="developer" selected>Developer</option>
+      <option value="designer">Designer</option>
+    </select>
+  </label><br>
+  <label><input type="checkbox" name="newsletter" value="yes" checked /> Subscribe</label><br>
+  <button type="submit">Submit Form</button>
+</form>
+```
+
+Testing via **cURL**:
+```bash
+curl -X POST http://localhost:5000/api/forms/submit \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "username=johndoe&email=john%40example.com&role=developer&newsletter=yes"
+```
+
+Response:
+```json
+{
+  "success": true,
+  "message": "Form submission received successfully. (Echo test mode: Data is not saved)",
+  "receivedAt": "2026-10-18T12:45:00.000Z",
+  "method": "POST",
+  "contentType": "application/x-www-form-urlencoded",
+  "fieldsCount": 4,
+  "fields": {
+    "username": "johndoe",
+    "email": "john@example.com",
+    "role": "developer",
+    "newsletter": "yes"
+  },
+  "filesCount": 0,
+  "files": []
+}
+```
+
+---
+
+### 7. Testing JavaScript JSON Form Submissions (`application/json`)
+
+Using client-side JavaScript (`fetch`):
+```javascript
+const formData = {
+  fullName: "Alice Smith",
+  department: "Engineering",
+  skills: ["React", "Node.js", "Docker"],
+  notifications: true
+};
+
+const response = await fetch("http://localhost:5000/api/forms/submit", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(formData)
+});
+
+const result = await response.json();
+console.log("Form Echo Result:", result);
+```
+
+Response:
+```json
+{
+  "success": true,
+  "message": "Form submission received successfully. (Echo test mode: Data is not saved)",
+  "receivedAt": "2026-10-18T12:46:00.000Z",
+  "method": "POST",
+  "contentType": "application/json",
+  "fieldsCount": 4,
+  "fields": {
+    "fullName": "Alice Smith",
+    "department": "Engineering",
+    "skills": ["React", "Node.js", "Docker"],
+    "notifications": true
+  },
+  "filesCount": 0,
+  "files": []
+}
+```
+
+---
+
+### 8. Testing Multipart Forms with Attached Files (`multipart/form-data`)
+
+HTML Form with file attachment:
+```html
+<form action="http://localhost:5000/api/forms/submit" method="POST" enctype="multipart/form-data">
+  <input type="text" name="feedbackTitle" value="Great API!" />
+  <input type="file" name="screenshot" />
+  <button type="submit">Submit Feedback</button>
+</form>
+```
+
+Using **cURL**:
+```bash
+curl -X POST http://localhost:5000/api/forms/submit \
+  -F "feedbackTitle=Great API!" \
+  -F "screenshot=@/path/to/screenshot.png"
+```
+
+Response:
+```json
+{
+  "success": true,
+  "message": "Form submission received successfully. (Echo test mode: Data is not saved)",
+  "receivedAt": "2026-10-18T12:47:00.000Z",
+  "method": "POST",
+  "contentType": "multipart/form-data; boundary=...",
+  "fieldsCount": 1,
+  "fields": {
+    "feedbackTitle": "Great API!"
+  },
+  "filesCount": 1,
+  "files": [
+    {
+      "fieldName": "screenshot",
+      "originalName": "screenshot.png",
+      "mimeType": "image/png",
+      "sizeBytes": 54200,
+      "formattedSize": "52.93 KB"
+    }
+  ]
+}
+```
+
+---
+
+### 9. Browser In-Place Visual Inspection (`?format=html`)
+
+When testing directly inside a browser without opening developer tools, submit to `http://localhost:5000/api/forms/submit?format=html`.
+
+The server responds with an HTML page featuring:
+- Visual badges for HTTP method and content type.
+- A styled table of all submitted text fields and detected types.
+- A styled table of attached files with original names, MIME types, and sizes.
+- Formatted raw JSON payload box for quick copying.
+

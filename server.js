@@ -4,6 +4,7 @@ import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
 import multer from "multer";
+import formRoutes from "./routes/formRoutes.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -24,6 +25,7 @@ const POSTS_UPLOAD_DIR = path.join(UPLOADS_DIR, "posts");
 
 app.use(cors());
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 // Serve static uploaded files
 app.use("/uploads", express.static(UPLOADS_DIR));
@@ -875,6 +877,11 @@ app.post(
   handlePostUpload,
   postPhotoUploadHandler,
 );
+
+// ==========================================
+// 7. Form Testing Submission Routes
+// ==========================================
+app.use("/api", formRoutes);
 
 // ==========================================
 // Start Server
