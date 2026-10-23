@@ -41,7 +41,10 @@ This server provides a zero-configuration, in-memory database pre-seeded with re
   - [Running Locally (Development)](#running-locally-development)
   - [Running with Docker (Containerized on VPS)](#running-with-docker-containerized-on-vps)
   - [Re-deploying on VPS (Updating Container)](#re-deploying-on-vps-updating-container)
-  - [Deploying via Git Container Registry (GHCR / GitLab)](#deploying-via-git-container-registry-ghcr--gitlab)
+  - [Deploying via Git Container Registry (GHCR) & GitHub Actions](#deploying-via-git-container-registry-ghcr--github-actions)
+    - [Automated CI/CD Pipeline (GitHub Actions)](#automated-cicd-pipeline-github-actions)
+    - [Deploying / Updating Container on VPS](#deploying--updating-container-on-vps)
+    - [Manual Build & Push Alternative](#manual-build--push-alternative)
 - [Complete API Reference](#complete-api-reference)
   - [Authentication Endpoints](#authentication-endpoints)
   - [Posts Endpoints](#posts-endpoints)
@@ -511,33 +514,77 @@ docker run -d \
 
 ---
 
-### Deploying via Git Container Registry (GHCR / GitLab)
+### Deploying via Git Container Registry (GHCR) & GitHub Actions
 
-#### 1. Build and Push Image:
+This repository is equipped with an automated CI/CD pipeline powered by **GitHub Actions** located at [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml).
+
+#### Automated CI/CD Pipeline (GitHub Actions)
+
+Whenever new code is pushed to the `main` branch (or triggered manually via `workflow_dispatch` in the GitHub Actions UI):
+1. **Automated Test Stage**:
+   - Spawns an isolated `ubuntu-latest` runner with Node.js 20.
+   - Executes `npm ci` followed by `npm test` to validate all core API contracts, default `userId: 1` fallbacks, and photo upload filters.
+2. **Docker Build & Publish Stage**:
+   - Runs only after tests pass successfully.
+   - Sets up Docker Buildx with GitHub Actions layer caching (`type=gha`) for fast builds.
+   - Authenticates against GitHub Container Registry (`ghcr.io`) using the scoped `${{ secrets.GITHUB_TOKEN }}`.
+   - Builds and tags the image:
+     - `ghcr.io/<github-owner>/social-app-api-server:latest`
+     - `ghcr.io/<github-owner>/social-app-api-server:sha-<short_sha>`
+   - Pushes the resulting container image to GHCR.
+
+> [!NOTE]
+> **GitHub Package Visibility**: By default, packages published to GHCR might be private. In your GitHub repository under **Packages** &gt; **Package Settings**, ensure the package visibility is set to **Public** if your VPS pulls without a personal access token (PAT), or log in with a PAT on your VPS if keeping it private.
+
+#### Deploying / Updating Container on VPS
+
+On your production or staging VPS, pull and run the published container image:
+
 ```bash
-IMAGE_NAME="ghcr.io/<YOUR_GITHUB_USERNAME>/social-app-api:latest"
+# 1. Target image name (all lowercase in GHCR)
+IMAGE_NAME="ghcr.io/codewiththura/social-app-api-server:latest"
 
-docker build -t $IMAGE_NAME .
-echo $GITHUB_TOKEN | docker login ghcr.io -u <YOUR_GITHUB_USERNAME> --password-stdin
-docker push $IMAGE_NAME
-```
+# 2. (Optional) Log in if your GHCR package is private
+# echo $GHCR_PAT | docker login ghcr.io -u <YOUR_GITHUB_USERNAME> --password-stdin
 
-#### 2. Pull and Run on VPS:
-```bash
-IMAGE_NAME="ghcr.io/<YOUR_GITHUB_USERNAME>/social-app-api:latest"
-
+# 3. Pull the latest image built by GitHub Actions
 docker pull $IMAGE_NAME
+
+# 4. Ensure persistent upload folders exist on host
 mkdir -p uploads/users uploads/posts
 
+# 5. Stop and remove existing container
 docker stop social-app-api-container || true
 docker rm social-app-api-container || true
 
+# 6. Run container with persistent uploads volume
 docker run -d \
   --name social-app-api-container \
   -p 5000:5000 \
   -v $(pwd)/uploads:/usr/src/app/uploads \
   --restart unless-stopped \
   $IMAGE_NAME
+
+# 7. Check container status & logs
+docker ps
+docker logs -f social-app-api-container
+```
+
+#### Manual Build & Push Alternative
+
+If you ever need to manually build and push outside of GitHub Actions:
+
+```bash
+IMAGE_NAME="ghcr.io/<YOUR_GITHUB_USERNAME>/social-app-api-server:latest"
+
+# Build image locally
+docker build -t $IMAGE_NAME .
+
+# Authenticate with Personal Access Token (classic with write:packages or fine-grained)
+echo $GITHUB_TOKEN | docker login ghcr.io -u <YOUR_GITHUB_USERNAME> --password-stdin
+
+# Push to registry
+docker push $IMAGE_NAME
 ```
 
 ---
