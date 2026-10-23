@@ -532,11 +532,25 @@ Whenever new code is pushed to the `main` branch (or triggered manually via `wor
      - `ghcr.io/<github-owner>/social-app-api-server:latest`
      - `ghcr.io/<github-owner>/social-app-api-server:sha-<short_sha>`
    - Pushes the resulting container image to GHCR.
+3. **Automated SSH Remote Deploy Stage (Zero-Touch)**:
+   - Authenticates directly into your VPS via SSH (`appleboy/ssh-action`).
+   - Pulls the newly built image, swaps the running container gracefully with persistent upload volume bindings (`~/social-app/uploads`), and removes old unused images (`docker image prune`).
+
+#### Required GitHub Repository Secrets
+
+Configure the following secrets in **Settings** &gt; **Secrets and variables** &gt; **Actions**:
+
+| Secret Name | Description | Example |
+| :--- | :--- | :--- |
+| `VPS_HOST` | VPS Public IP address | `118.27.150.81` |
+| `VPS_USERNAME` | SSH username on VPS | `debian` |
+| `VPS_SSH_KEY` | SSH Private key (`~/.ssh/github_actions_deploy`) | `-----BEGIN OPENSSH PRIVATE KEY-----...` |
+| `VPS_PORT` | SSH Port (optional, defaults to 22) | `22` |
 
 > [!NOTE]
-> **GitHub Package Visibility**: By default, packages published to GHCR might be private. In your GitHub repository under **Packages** &gt; **Package Settings**, ensure the package visibility is set to **Public** if your VPS pulls without a personal access token (PAT), or log in with a PAT on your VPS if keeping it private.
+> **GitHub Package Visibility**: In your GitHub repository under **Packages** &gt; **Package Settings**, ensure the package visibility is set to **Public** so your VPS can pull images seamlessly without requiring manual token logins.
 
-#### Deploying / Updating Container on VPS
+#### Manual VPS Pull & Run (Alternative)
 
 On your production or staging VPS, pull and run the published container image:
 
