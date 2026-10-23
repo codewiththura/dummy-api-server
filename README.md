@@ -589,59 +589,594 @@ docker push $IMAGE_NAME
 
 ---
 
-## Complete API Reference
+## Complete API Reference & Response Structures
+
+All endpoints return standard HTTP status codes (`200 OK`, `201 Created`, `400 Bad Request`, `401 Unauthorized`, `403 Forbidden`, `404 Not Found`, `429 Too Many Requests`). All JSON responses use standard camelCase fields.
+
+---
 
 ### Authentication Endpoints
 
-| Method | Endpoint | Access | Rate Limit | Description |
-| :--- | :--- | :--- | :---: | :--- |
-| `POST` | `/api/auth/register` | Public | 30 / min | Register new user account |
-| `POST` | `/api/auth/login` | Public | 30 / min | Log in user account (sets `CURRENT_USER_ID`) |
-| `GET` | `/api/auth/me` | Logged In | 80 / min | Fetch active user info (401 if unauthenticated) |
-| `POST` | `/api/auth/logout` | Logged In | 80 / min | Log out (reverts active user to `null`, fallback `userId: 1`) |
+#### 1. Register Account — `POST /api/auth/register`
+- **Access**: Public
+- **Rate Limit**: 30 req / min
+- **Request Body**:
+  ```json
+  {
+    "name": "Alex Mercer",
+    "email": "alex@example.com",
+    "password": "password123",
+    "username": "alexm",
+    "bio": "Frontend developer & tech enthusiast.",
+    "avatarUrl": "https://i.pravatar.cc/150?u=alexm"
+  }
+  ```
+- **Response (`201 Created`)**:
+  ```json
+  {
+    "id": 1729235000000,
+    "name": "Alex Mercer",
+    "username": "alexm",
+    "email": "alex@example.com",
+    "avatarUrl": "https://i.pravatar.cc/150?u=alexm",
+    "bio": "Frontend developer & tech enthusiast.",
+    "createdAt": "2026-10-23T08:30:00.000Z",
+    "updatedAt": "2026-10-23T08:30:00.000Z"
+  }
+  ```
+- **Error Responses**:
+  - `400 Bad Request`: `{"error": "Email and password are required"}` or `{"error": "Email already registered"}`
+
+#### 2. Log In — `POST /api/auth/login`
+- **Access**: Public
+- **Rate Limit**: 30 req / min
+- **Request Body**:
+  ```json
+  {
+    "email": "thura@example.com",
+    "password": "password123"
+  }
+  ```
+- **Response (`200 OK`)**:
+  ```json
+  {
+    "id": 1,
+    "name": "Thura",
+    "username": "thura",
+    "email": "thura@example.com",
+    "avatarUrl": "https://i.pravatar.cc/150?img=68",
+    "bio": "Passionate React & Node.js Developer.",
+    "createdAt": "2026-08-01T10:00:00.000Z",
+    "updatedAt": "2026-08-01T10:00:00.000Z"
+  }
+  ```
+- **Error Response**:
+  - `401 Unauthorized`: `{"error": "Invalid email or password"}`
+
+#### 3. Get Current User Profile — `GET /api/auth/me`
+- **Access**: Logged In (requires active session from `/api/auth/login` or register)
+- **Rate Limit**: 80 req / min
+- **Response (`200 OK`)**:
+  ```json
+  {
+    "id": 1,
+    "name": "Thura",
+    "username": "thura",
+    "email": "thura@example.com",
+    "avatarUrl": "https://i.pravatar.cc/150?img=68",
+    "bio": "Passionate React & Node.js Developer.",
+    "createdAt": "2026-08-01T10:00:00.000Z",
+    "updatedAt": "2026-08-01T10:00:00.000Z"
+  }
+  ```
+- **Error Response**:
+  - `401 Unauthorized`: `{"error": "Not authenticated"}`
+
+#### 4. Log Out — `POST /api/auth/logout`
+- **Access**: Public
+- **Response (`200 OK`)**:
+  ```json
+  {
+    "success": true
+  }
+  ```
+
+---
 
 ### Posts Endpoints
 
-| Method | Endpoint | Access | Fallback / Auth Rule | Description |
-| :--- | :--- | :--- | :--- | :--- |
-| `GET` | `/api/posts` | Public | None | List all active posts (supports `?userId=X`) |
-| `GET` | `/api/posts?archived=true` | Logged In | Author Only | List user's private archived posts |
-| `GET` | `/api/posts/:id` | Public | Author if archived | Get post details (403 if archived by another user) |
-| `POST` | `/api/posts` | Public | Defaults to `userId: 1` | Create new post (`{ "title": "...", "body": "..." }`) |
-| `PUT` | `/api/posts/:id` | Author | Defaults to `userId: 1` | Update post (`{ "title": "...", "body": "..." }`) |
-| `POST` | `/api/posts/:id/archive` | Author | Defaults to `userId: 1` | Toggle or set archive status (`{ "isArchived": true }`) |
-| `DELETE` | `/api/posts/:id` | Author | Defaults to `userId: 1` | Delete post and attached comments |
-| `POST` | `/api/posts/:id/like` | Public | `req.body.userId \|\| 1` | Toggle like status on post |
-| `POST` | `/api/posts/:id/save` | Public | `req.body.userId \|\| 1` | Toggle save status on post |
+#### 1. List Posts — `GET /api/posts`
+- **Access**: Public
+- **Query Parameters**:
+  - `userId` (optional): Filter posts by specific author ID (e.g. `?userId=2`).
+  - `archived` (optional): If `true`, returns user's private archived posts (only visible to logged-in author).
+- **Response (`200 OK`)**:
+  ```json
+  [
+    {
+      "id": 1,
+      "userId": 1,
+      "title": "Getting Started with React",
+      "body": "React is a JavaScript library for building user interfaces.",
+      "imageUrl": "https://unsplash.com/photos/4hbJ-eymZ1o/download?force=true&w=640",
+      "likes": [2, 3, 4, 5],
+      "likesCount": 4,
+      "isLiked": false,
+      "savedBy": [2],
+      "isSaved": false,
+      "isArchived": false,
+      "createdAt": "2026-08-20T10:00:00.000Z",
+      "updatedAt": "2026-08-20T10:00:00.000Z",
+      "author": {
+        "id": 1,
+        "name": "Thura",
+        "username": "thura",
+        "avatarUrl": "https://i.pravatar.cc/150?img=68"
+      }
+    }
+  ]
+  ```
+
+#### 2. Get Post Details — `GET /api/posts/:id`
+- **Access**: Public (Author only if archived)
+- **Response (`200 OK`)**:
+  ```json
+  {
+    "id": 1,
+    "userId": 1,
+    "title": "Getting Started with React",
+    "body": "React is a JavaScript library for building user interfaces.",
+    "imageUrl": "https://unsplash.com/photos/4hbJ-eymZ1o/download?force=true&w=640",
+    "likes": [2, 3, 4, 5],
+    "likesCount": 4,
+    "isLiked": false,
+    "savedBy": [2],
+    "isSaved": false,
+    "isArchived": false,
+    "createdAt": "2026-08-20T10:00:00.000Z",
+    "updatedAt": "2026-08-20T10:00:00.000Z",
+    "author": {
+      "id": 1,
+      "name": "Thura",
+      "username": "thura",
+      "avatarUrl": "https://i.pravatar.cc/150?img=68"
+    }
+  }
+  ```
+- **Error Responses**:
+  - `404 Not Found`: `{"error": "Post not found"}`
+  - `403 Forbidden`: `{"error": "Archived post can only be viewed by its author"}`
+
+#### 3. Create Post — `POST /api/posts`
+- **Access**: Public (Defaults to `userId: 1` if not logged in)
+- **Request Body**:
+  ```json
+  {
+    "title": "Mastering Async/Await in JavaScript",
+    "body": "Promises and async/await simplify asynchronous flow.",
+    "imageUrl": "https://picsum.photos/seed/async/600/350"
+  }
+  ```
+- **Response (`201 Created`)**:
+  ```json
+  {
+    "id": 1729236100000,
+    "userId": 1,
+    "title": "Mastering Async/Await in JavaScript",
+    "body": "Promises and async/await simplify asynchronous flow.",
+    "imageUrl": "https://picsum.photos/seed/async/600/350",
+    "likes": [],
+    "likesCount": 0,
+    "isLiked": false,
+    "savedBy": [],
+    "isSaved": false,
+    "isArchived": false,
+    "createdAt": "2026-10-23T08:35:00.000Z",
+    "updatedAt": "2026-10-23T08:35:00.000Z",
+    "author": {
+      "id": 1,
+      "name": "Thura",
+      "username": "thura",
+      "avatarUrl": "https://i.pravatar.cc/150?img=68"
+    }
+  }
+  ```
+- **Error Response**:
+  - `400 Bad Request`: `{"error": "Title is required"}`
+
+#### 4. Update Post — `PUT /api/posts/:id`
+- **Access**: Post Author (Defaults to `userId: 1`)
+- **Request Body**:
+  ```json
+  {
+    "title": "Updated Title: React & Redux Toolkit",
+    "body": "Updated body description."
+  }
+  ```
+- **Response (`200 OK`)**:
+  ```json
+  {
+    "id": 1,
+    "userId": 1,
+    "title": "Updated Title: React & Redux Toolkit",
+    "body": "Updated body description.",
+    "imageUrl": "https://unsplash.com/photos/4hbJ-eymZ1o/download?force=true&w=640",
+    "likes": [2, 3, 4, 5],
+    "likesCount": 4,
+    "isLiked": false,
+    "savedBy": [2],
+    "isSaved": false,
+    "isArchived": false,
+    "createdAt": "2026-08-20T10:00:00.000Z",
+    "updatedAt": "2026-10-23T08:36:00.000Z",
+    "author": {
+      "id": 1,
+      "name": "Thura",
+      "username": "thura",
+      "avatarUrl": "https://i.pravatar.cc/150?img=68"
+    }
+  }
+  ```
+- **Error Responses**:
+  - `404 Not Found`: `{"error": "Post not found"}`
+  - `403 Forbidden`: `{"error": "Unauthorized: You can only edit your own posts"}`
+
+#### 5. Archive / Unarchive Post — `POST /api/posts/:id/archive`
+- **Access**: Post Author (Defaults to `userId: 1`)
+- **Request Body (optional)**:
+  ```json
+  {
+    "isArchived": true
+  }
+  ```
+  *(If omitted, toggles current archive status)*
+- **Response (`200 OK`)**:
+  ```json
+  {
+    "id": 1,
+    "userId": 1,
+    "title": "Getting Started with React",
+    "isArchived": true,
+    "updatedAt": "2026-10-23T08:37:00.000Z",
+    "author": {
+      "id": 1,
+      "name": "Thura",
+      "username": "thura",
+      "avatarUrl": "https://i.pravatar.cc/150?img=68"
+    }
+  }
+  ```
+
+#### 6. Delete Post — `DELETE /api/posts/:id`
+- **Access**: Post Author (Defaults to `userId: 1`)
+- **Response (`200 OK`)**:
+  ```json
+  {
+    "success": true,
+    "deletedPostId": 1,
+    "deletedPost": {
+      "id": 1,
+      "userId": 1,
+      "title": "Getting Started with React",
+      "author": {
+        "id": 1,
+        "name": "Thura",
+        "username": "thura",
+        "avatarUrl": "https://i.pravatar.cc/150?img=68"
+      }
+    }
+  }
+  ```
+- **Error Responses**:
+  - `404 Not Found`: `{"error": "Post not found"}`
+  - `403 Forbidden`: `{"error": "Unauthorized: You can only delete your own posts"}`
+
+#### 7. Like / Unlike Post — `POST /api/posts/:id/like`
+- **Access**: Public
+- **Request Body (optional)**:
+  ```json
+  {
+    "userId": 2
+  }
+  ```
+  *(Defaults to active user or `userId: 1` if omitted)*
+- **Response (`200 OK`)**:
+  ```json
+  {
+    "id": 1,
+    "likes": [2, 3, 4, 5, 1],
+    "likesCount": 5,
+    "isLiked": true,
+    "updatedAt": "2026-10-23T08:38:00.000Z",
+    "author": {
+      "id": 1,
+      "name": "Thura",
+      "username": "thura",
+      "avatarUrl": "https://i.pravatar.cc/150?img=68"
+    }
+  }
+  ```
+
+#### 8. Save / Unsave Post — `POST /api/posts/:id/save`
+- **Access**: Public
+- **Request Body (optional)**:
+  ```json
+  {
+    "userId": 2
+  }
+  ```
+  *(Defaults to active user or `userId: 1` if omitted)*
+- **Response (`200 OK`)**:
+  ```json
+  {
+    "id": 1,
+    "savedBy": [2, 1],
+    "isSaved": true,
+    "updatedAt": "2026-10-23T08:39:00.000Z",
+    "author": {
+      "id": 1,
+      "name": "Thura",
+      "username": "thura",
+      "avatarUrl": "https://i.pravatar.cc/150?img=68"
+    }
+  }
+  ```
+
+---
 
 ### Photo Upload Endpoints
 
-| Method | Endpoint | Aliases | Form Field Names | Allowed Formats | Size Limit | Description |
-| :--- | :--- | :--- | :--- | :--- | :---: | :--- |
-| `POST` | `/api/users/:id/photo` | `/api/users/:id/avatar`, `/api/upload/user/:id` | `photo`, `image`, `avatar`, `file` | JPG, PNG, GIF, WEBP, SVG | 5 MB | Upload profile avatar for user `:id` (overwrites previous) |
-| `POST` | `/api/posts/:id/photo` | `/api/posts/:id/image`, `/api/upload/post/:id` | `photo`, `image`, `avatar`, `file` | JPG, PNG, GIF, WEBP, SVG | 5 MB | Upload image for post `:id` (overwrites previous) |
+#### 1. Upload User Avatar — `POST /api/users/:id/photo`
+- **Aliases**: `/api/users/:id/avatar`, `/api/upload/user/:id`
+- **Content-Type**: `multipart/form-data`
+- **Accepted Field Names**: `photo`, `image`, `avatar`, `file`
+- **Allowed Types**: JPG, PNG, GIF, WEBP, SVG (&le; 5 MB)
+- **Response (`200 OK`)**:
+  ```json
+  {
+    "message": "User profile photo uploaded successfully",
+    "avatarUrl": "/uploads/users/user-1.jpg",
+    "fullUrl": "http://localhost:5000/uploads/users/user-1.jpg",
+    "filename": "user-1.jpg",
+    "size": 45210,
+    "user": {
+      "id": 1,
+      "name": "Thura",
+      "username": "thura",
+      "email": "thura@example.com",
+      "avatarUrl": "/uploads/users/user-1.jpg",
+      "bio": "Passionate React & Node.js Developer.",
+      "createdAt": "2026-08-01T10:00:00.000Z",
+      "updatedAt": "2026-10-23T08:40:00.000Z"
+    }
+  }
+  ```
+- **Error Responses**:
+  - `400 Bad Request`: `{"error": "Invalid file type. Only image files (JPG, PNG, GIF, WEBP, SVG) are allowed."}` or `{"error": "File is too large. Maximum allowed size is 5MB."}`
+  - `404 Not Found`: `{"error": "User not found"}`
 
-### Form Testing Endpoints
+#### 2. Upload Post Cover Image — `POST /api/posts/:id/photo`
+- **Aliases**: `/api/posts/:id/image`, `/api/upload/post/:id`
+- **Content-Type**: `multipart/form-data`
+- **Accepted Field Names**: `photo`, `image`, `avatar`, `file`
+- **Allowed Types**: JPG, PNG, GIF, WEBP, SVG (&le; 5 MB)
+- **Response (`200 OK`)**:
+  ```json
+  {
+    "message": "Post photo uploaded successfully",
+    "imageUrl": "/uploads/posts/post-1.png",
+    "fullUrl": "http://localhost:5000/uploads/posts/post-1.png",
+    "filename": "post-1.png",
+    "size": 89124,
+    "post": {
+      "id": 1,
+      "userId": 1,
+      "title": "Getting Started with React",
+      "imageUrl": "/uploads/posts/post-1.png",
+      "likes": [2, 3, 4, 5],
+      "likesCount": 4,
+      "isLiked": false,
+      "savedBy": [2],
+      "isSaved": false,
+      "isArchived": false,
+      "createdAt": "2026-08-20T10:00:00.000Z",
+      "updatedAt": "2026-10-23T08:41:00.000Z",
+      "author": {
+        "id": 1,
+        "name": "Thura",
+        "username": "thura",
+        "avatarUrl": "https://i.pravatar.cc/150?img=68"
+      }
+    }
+  }
+  ```
+- **Error Responses**:
+  - `400 Bad Request`: `{"error": "File is too large. Maximum allowed size is 5MB."}`
+  - `404 Not Found`: `{"error": "Post not found"}`
 
-| Method | Endpoint | Aliases | Accepted Encodings | Auth / Validation | Description |
-| :--- | :--- | :--- | :--- | :---: | :--- |
-| `POST` / `GET` / `PUT` / `PATCH` | `/api/forms/submit` | `/api/forms/test`, `/api/form-submit` | `urlencoded`, `json`, `multipart/form-data` | None (Echo Only) | Parses all HTML input fields and memory-safe files, returning submitted fields without saving to database. Supports `?format=html` for in-browser visual inspection. |
+---
+
+### Form Testing & Echo Endpoints
+
+#### Submit / Echo Form Data — `POST` / `GET` / `PUT` / `PATCH` `/api/forms/submit`
+- **Aliases**: `/api/forms/test`, `/api/form-submit`
+- **Content-Types**: `application/x-www-form-urlencoded`, `application/json`, `multipart/form-data`
+- **Query Parameter**: `?format=html` (renders styled visual dashboard inside browser)
+- **Response (`200 OK`)**:
+  ```json
+  {
+    "success": true,
+    "message": "Form submission received successfully. (Echo test mode: Data is not saved)",
+    "receivedAt": "2026-10-23T08:42:00.000Z",
+    "method": "POST",
+    "contentType": "application/json",
+    "fieldsCount": 3,
+    "fields": {
+      "fullName": "Alice Smith",
+      "department": "Engineering",
+      "subscribe": true
+    },
+    "filesCount": 1,
+    "files": [
+      {
+        "fieldName": "resume",
+        "originalName": "resume.pdf",
+        "mimeType": "application/pdf",
+        "sizeBytes": 204800,
+        "formattedSize": "200 KB"
+      }
+    ]
+  }
+  ```
+
+---
 
 ### Comments Endpoints
 
-| Method | Endpoint | Access | Fallback / Auth Rule | Description |
-| :--- | :--- | :--- | :--- | :--- |
-| `GET` | `/api/posts/:postId/comments` | Public | None | List comments for a post |
-| `POST` | `/api/posts/:postId/comments` | Public | Defaults to `userId: 1` | Create comment on post (`{ "body": "..." }`) |
+#### 1. List Comments for a Post — `GET /api/posts/:postId/comments`
+- **Access**: Public
+- **Response (`200 OK`)**:
+  ```json
+  [
+    {
+      "id": 101,
+      "postId": 1,
+      "userId": 2,
+      "name": "May Thin",
+      "email": "maythin@example.com",
+      "body": "This is a great introduction to React! Very helpful for beginners.",
+      "createdAt": "2026-08-20T11:00:00.000Z"
+    },
+    {
+      "id": 102,
+      "postId": 1,
+      "userId": 3,
+      "name": "Zaw Min",
+      "email": "zawmin@example.com",
+      "body": "I learned a lot from this post. Thanks for sharing!",
+      "createdAt": "2026-08-20T12:30:00.000Z"
+    }
+  ]
+  ```
+
+#### 2. Create Comment — `POST /api/posts/:postId/comments`
+- **Access**: Public (Defaults to active user or `userId: 1`)
+- **Request Body**:
+  ```json
+  {
+    "body": "Awesome post! Looking forward to part two."
+  }
+  ```
+- **Response (`201 Created`)**:
+  ```json
+  {
+    "id": 1729237000000,
+    "postId": 1,
+    "userId": 1,
+    "name": "Thura",
+    "email": "thura@example.com",
+    "body": "Awesome post! Looking forward to part two.",
+    "createdAt": "2026-10-23T08:43:00.000Z"
+  }
+  ```
+- **Error Response**:
+  - `400 Bad Request`: `{"error": "Comment body is required"}`
+
+---
 
 ### Users Endpoints
 
-| Method | Endpoint | Access | Description |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/api/users` | Public | List all mock user profiles (passwords omitted) |
-| `GET` | `/api/users/:id` | Public | Get user profile by ID |
-| `PUT` | `/api/users/:id` | Public | Update user profile fields (bio, name, avatarUrl) |
-| `DELETE` | `/api/users/:id` | Public | Delete user profile from in-memory database |
+#### 1. List Users — `GET /api/users`
+- **Access**: Public
+- **Response (`200 OK`)**:
+  ```json
+  [
+    {
+      "id": 1,
+      "name": "Thura",
+      "username": "thura",
+      "email": "thura@example.com",
+      "avatarUrl": "https://i.pravatar.cc/150?img=68",
+      "bio": "Passionate React & Node.js Developer.",
+      "createdAt": "2026-08-01T10:00:00.000Z",
+      "updatedAt": "2026-08-01T10:00:00.000Z"
+    },
+    {
+      "id": 2,
+      "name": "May Thin",
+      "username": "maythin",
+      "email": "maythin@example.com",
+      "avatarUrl": "https://i.pravatar.cc/150?u=maythin",
+      "bio": "Frontend UI/UX enthusiast and technical writer.",
+      "createdAt": "2026-08-02T10:00:00.000Z",
+      "updatedAt": "2026-08-02T10:00:00.000Z"
+    }
+  ]
+  ```
+
+#### 2. Get User by ID — `GET /api/users/:id`
+- **Access**: Public
+- **Response (`200 OK`)**:
+  ```json
+  {
+    "id": 1,
+    "name": "Thura",
+    "username": "thura",
+    "email": "thura@example.com",
+    "avatarUrl": "https://i.pravatar.cc/150?img=68",
+    "bio": "Passionate React & Node.js Developer.",
+    "createdAt": "2026-08-01T10:00:00.000Z",
+    "updatedAt": "2026-08-01T10:00:00.000Z"
+  }
+  ```
+- **Error Response**:
+  - `404 Not Found`: `{"error": "User not found"}`
+
+#### 3. Update User — `PUT /api/users/:id`
+- **Access**: Public
+- **Request Body**:
+  ```json
+  {
+    "name": "Thura (Updated)",
+    "bio": "Senior Fullstack Engineer & Open Source Contributor."
+  }
+  ```
+- **Response (`200 OK`)**:
+  ```json
+  {
+    "id": 1,
+    "name": "Thura (Updated)",
+    "username": "thura",
+    "email": "thura@example.com",
+    "avatarUrl": "https://i.pravatar.cc/150?img=68",
+    "bio": "Senior Fullstack Engineer & Open Source Contributor.",
+    "createdAt": "2026-08-01T10:00:00.000Z",
+    "updatedAt": "2026-10-23T08:44:00.000Z"
+  }
+  ```
+- **Error Response**:
+  - `404 Not Found`: `{"error": "User not found"}`
+
+#### 4. Delete User — `DELETE /api/users/:id`
+- **Access**: Public
+- **Response (`200 OK`)**:
+  ```json
+  {
+    "success": true,
+    "deletedUser": {
+      "id": 6,
+      "name": "Su Su",
+      "username": "susu",
+      "email": "susu@example.com",
+      "avatarUrl": "https://i.pravatar.cc/150?u=susu",
+      "bio": "React and Next.js Frontend Developer.",
+      "createdAt": "2026-08-06T13:00:00.000Z",
+      "updatedAt": "2026-08-06T13:00:00.000Z"
+    }
+  }
+  ```
+- **Error Response**:
+  - `404 Not Found`: `{"error": "User not found"}`
 
 ---
 
