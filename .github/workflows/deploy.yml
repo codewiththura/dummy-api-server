@@ -98,17 +98,18 @@ jobs:
             docker pull $IMAGE_NAME
             
             echo "🛑 Stopping and removing previous container..."
-            docker stop social-app-api-container 2>/dev/null || true
-            docker rm social-app-api-container 2>/dev/null || true
+            docker stop social-app-api social-app-api-container 2>/dev/null || true
+            docker rm social-app-api social-app-api-container 2>/dev/null || true
             
             echo "📁 Ensuring persistent uploads directory on host..."
-            mkdir -p ~/social-app/uploads/users ~/social-app/uploads/posts
+            mkdir -p /home/debian/social-api-server/uploads ~/social-app/uploads
             
-            echo "▶️ Launching updated container..."
+            echo "▶️ Launching updated container connected to reverse-proxy network..."
             docker run -d \
-              --name social-app-api-container \
+              --name social-app-api \
+              --network telegram-bot-v1_default \
               -p 5000:5000 \
-              -v ~/social-app/uploads:/usr/src/app/uploads \
+              -v /home/debian/social-api-server/uploads:/usr/src/app/uploads \
               --restart unless-stopped \
               $IMAGE_NAME
             
@@ -116,5 +117,6 @@ jobs:
             docker image prune -f
             
             echo "✅ Deployment successful! Active container:"
-            docker ps --filter "name=social-app-api-container"
+            docker ps --filter "name=social-app-api"
+
 
