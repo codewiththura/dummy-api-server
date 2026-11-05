@@ -129,12 +129,38 @@ To provide the smoothest developer experience, **this API defaults to `userId: 1
 | **Save / Unsave Post** | `POST /api/posts/:id/save` | Identifies user via `req.body.userId \|\| CURRENT_USER_ID \|\| 1`. Allows unauthenticated clients to toggle saves as User 1. |
 | **Add Comment** | `POST /api/posts/:postId/comments` | Assigns comment `userId: CURRENT_USER_ID \|\| 1`. If `name` or `email` are omitted in the body, it auto-fills with User 1's profile details (`"Thura"`, `"thura@example.com"`). |
 
-### Authenticating as Another User
+### Authenticating & Token-Based Authorization
 
-If you want to simulate multi-user behavior or test permissions:
-1. Call `POST /api/auth/login` with `{ "email": "maythin@example.com", "password": "password123" }`.
-2. The server sets `CURRENT_USER_ID = 2`.
-3. All subsequent requests will now act on behalf of User 2 (May Thin) until `POST /api/auth/logout` is called, which resets `CURRENT_USER_ID = null` (reverting back to the default `userId: 1` fallback).
+The authentication system aligns directly with the **Social App Demo** backend (`express-social-server`):
+- Login responses return `{ user, token }` containing the sanitized user profile and a signed HMAC-SHA256 JWT.
+- Routes are mounted under both `/api/auth/*` and `/auth/*` to support frontends regardless of whether `VITE_API_URL` includes a trailing `/api`.
+- Client requests can supply the token in the `Authorization: Bearer <token>` header (or `x-access-token`), and the server resolves `req.user` accordingly.
+
+#### Quick Flow:
+1. Call `POST /api/auth/login` (or `POST /auth/login`) with credentials:
+   ```json
+   { "email": "maythin@example.com", "password": "password123" }
+   ```
+2. Response returns `{ user, token }`:
+   ```json
+   {
+     "user": {
+       "id": 2,
+       "_id": 2,
+       "name": "May Thin",
+       "username": "maythin",
+       "email": "maythin@example.com",
+       "avatarUrl": "https://i.pravatar.cc/150?u=maythin",
+       "bio": "Frontend UI/UX enthusiast and technical writer.",
+       "createdAt": "2026-08-02T09:00:00.000Z",
+       "updatedAt": "2026-08-02T09:00:00.000Z"
+     },
+     "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+   }
+   ```
+3. Pass `Authorization: Bearer <token>` on subsequent requests.
+4. **Fast Testing Fallback**: For rapid development and class demonstrations, unauthenticated requests gracefully default to User 1 (`Thura`), eliminating barriers for quick manual testing with tools like curl, Postman, or early UI drafts.
+5. Call `POST /api/auth/logout` (or `POST /auth/logout`) to reset the active session.
 
 ---
 
@@ -641,7 +667,7 @@ All endpoints return standard HTTP status codes (`200 OK`, `201 Created`, `400 B
 - **Error Responses**:
   - `400 Bad Request`: `{"error": "Email and password are required"}` or `{"error": "Email already registered"}`
 
-#### 2. Log In — `POST /api/auth/login`
+#### 2. Log In — `POST /api/auth/login` (or `POST /auth/login`)
 - **Access**: Public
 - **Rate Limit**: 30 req / min
 - **Request Body**:
@@ -654,39 +680,47 @@ All endpoints return standard HTTP status codes (`200 OK`, `201 Created`, `400 B
 - **Response (`200 OK`)**:
   ```json
   {
-    "id": 1,
-    "name": "Thura",
-    "username": "thura",
-    "email": "thura@example.com",
-    "avatarUrl": "https://i.pravatar.cc/150?img=68",
-    "bio": "Passionate React & Node.js Developer.",
-    "createdAt": "2026-08-01T10:00:00.000Z",
-    "updatedAt": "2026-08-01T10:00:00.000Z"
+    "user": {
+      "id": 1,
+      "_id": 1,
+      "name": "Thura",
+      "username": "thura",
+      "email": "thura@example.com",
+      "avatarUrl": "https://i.pravatar.cc/150?img=68",
+      "bio": "Passionate React & Node.js Developer.",
+      "createdAt": "2026-08-01T08:00:00.000Z",
+      "updatedAt": "2026-08-01T08:00:00.000Z"
+    },
+    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjEsImlkIjoxLCJlbWFpbCI6InRodXJhQGV4YW1wbGUuY29tIiwiaWF0IjoxNzg5Mzg4MDAwLCJleHAiOjE3OTAwMDI4MDB9.signature..."
   }
   ```
 - **Error Response**:
-  - `401 Unauthorized`: `{"error": "Invalid email or password"}`
+  - `401 Unauthorized`: `{"error": "Invalid email or password", "message": "Invalid email or password"}`
+  - `400 Bad Request`: `{"error": "Email and password are required", "message": "Email and password are required"}`
 
-#### 3. Get Current User Profile — `GET /api/auth/me`
-- **Access**: Logged In (requires active session from `/api/auth/login` or register)
+#### 3. Get Current User Profile — `GET /api/auth/me` (or `GET /auth/me`)
+- **Access**: Logged In (via `Authorization: Bearer <token>` or active session)
 - **Rate Limit**: 80 req / min
+- **Headers (Optional / Recommended)**:
+  `Authorization: Bearer <token>`
 - **Response (`200 OK`)**:
   ```json
   {
     "id": 1,
+    "_id": 1,
     "name": "Thura",
     "username": "thura",
     "email": "thura@example.com",
     "avatarUrl": "https://i.pravatar.cc/150?img=68",
     "bio": "Passionate React & Node.js Developer.",
-    "createdAt": "2026-08-01T10:00:00.000Z",
-    "updatedAt": "2026-08-01T10:00:00.000Z"
+    "createdAt": "2026-08-01T08:00:00.000Z",
+    "updatedAt": "2026-08-01T08:00:00.000Z"
   }
   ```
 - **Error Response**:
-  - `401 Unauthorized`: `{"error": "Not authenticated"}`
+  - `401 Unauthorized`: `{"error": "Not authenticated", "message": "Authentication required"}`
 
-#### 4. Log Out — `POST /api/auth/logout`
+#### 4. Log Out — `POST /api/auth/logout` (or `POST /auth/logout`)
 - **Access**: Public
 - **Response (`200 OK`)**:
   ```json

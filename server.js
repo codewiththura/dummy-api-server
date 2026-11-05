@@ -5,6 +5,8 @@ import fs from "fs";
 import { fileURLToPath } from "url";
 import multer from "multer";
 import formRoutes from "./routes/formRoutes.js";
+import createAuthRouter from "./routes/authRoutes.js";
+import { createUserAuthMiddleware } from "./middleware/auth.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -113,6 +115,8 @@ const authRateLimiter = createRateLimiter({
 app.use("/api/", globalRateLimiter);
 app.use("/api/auth/login", authRateLimiter);
 app.use("/api/auth/register", authRateLimiter);
+app.use("/auth/login", authRateLimiter);
+app.use("/auth/register", authRateLimiter);
 
 // ==========================================
 // 1. In-Memory Database
@@ -277,7 +281,14 @@ let comments = [
 function sanitizeUser(user) {
   if (!user) return null;
   const { password, ...safeUser } = user;
-  return safeUser;
+  return {
+    ...safeUser,
+    _id: safeUser.id,
+  };
+}
+
+function getActiveUserId(req) {
+  return req?.user?.id || req?.userId || CURRENT_USER_ID || 1;
 }
 
 function formatPost(post, currentUserId = CURRENT_USER_ID) {
@@ -310,75 +321,21 @@ function formatPost(post, currentUserId = CURRENT_USER_ID) {
 // ==========================================
 // 2. Auth Endpoints
 // ==========================================
+const authUserMiddleware = createUserAuthMiddleware(users, () => CURRENT_USER_ID);
+app.use(authUserMiddleware);
 
-// POST /api/auth/register
-app.post("/api/auth/register", (req, res) => {
-  const { name, email, password, username, bio, avatarUrl } = req.body;
-  const normalizedEmail = (email || "").trim().toLowerCase();
-
-  if (!normalizedEmail || !password) {
-    return res.status(400).json({ error: "Email and password are required" });
-  }
-
-  const exists = users.some((u) => u.email.toLowerCase() === normalizedEmail);
-  if (exists) {
-    return res.status(400).json({ error: "Email already registered" });
-  }
-
-  const rawUsername = (username || name || "user")
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, "");
-  const now = new Date().toISOString();
-
-  const newUser = {
-    id: Date.now(),
-    name: name || "New User",
-    username: rawUsername,
-    email: normalizedEmail,
-    password,
-    avatarUrl: avatarUrl || `https://i.pravatar.cc/150?u=${rawUsername}`,
-    bio: bio || "Hello, I am using Social App!",
-    createdAt: now,
-    updatedAt: now,
-  };
-
-  users.push(newUser);
-  CURRENT_USER_ID = newUser.id;
-  return res.status(201).json(sanitizeUser(newUser));
+const authRouter = createAuthRouter({
+  users,
+  sanitizeUser,
+  setCurrentUserId: (id) => {
+    CURRENT_USER_ID = id;
+  },
+  getCurrentUserId: () => CURRENT_USER_ID,
 });
 
-// POST /api/auth/login
-app.post("/api/auth/login", (req, res) => {
-  const { email, password } = req.body;
-  const normalizedEmail = (email || "").trim().toLowerCase();
-
-  const user = users.find(
-    (u) => u.email.toLowerCase() === normalizedEmail && u.password === password,
-  );
-
-  if (!user) {
-    return res.status(401).json({ error: "Invalid email or password" });
-  }
-
-  CURRENT_USER_ID = user.id;
-  return res.json(sanitizeUser(user));
-});
-
-// GET /api/auth/me
-app.get("/api/auth/me", (req, res) => {
-  if (!CURRENT_USER_ID) {
-    return res.status(401).json({ error: "Not authenticated" });
-  }
-  const user = users.find((u) => u.id === CURRENT_USER_ID);
-  return res.json(sanitizeUser(user));
-});
-
-// POST /api/auth/logout
-app.post("/api/auth/logout", (req, res) => {
-  CURRENT_USER_ID = null;
-  return res.json({ success: true });
-});
+// Mounted under both /api/auth and /auth for client and fast testing compatibility
+app.use("/api/auth", authRouter);
+app.use("/auth", authRouter);
 
 // ==========================================
 // 3. Posts Endpoints
@@ -386,7 +343,7 @@ app.post("/api/auth/logout", (req, res) => {
 
 // GET /api/posts
 app.get("/api/posts", (req, res) => {
-  const currentUserId = CURRENT_USER_ID;
+  const currentUserId = req.user?.id || req.userId || CURRENT_USER_ID;
   const requestedUserId = req.query.userId ? Number(req.query.userId) : null;
   const isArchivedQuery =
     req.query.archived === "true" ||
@@ -422,13 +379,14 @@ app.get("/api/posts/:id", (req, res) => {
   const post = posts.find((p) => p.id === Number(req.params.id));
   if (!post) return res.status(404).json({ error: "Post not found" });
 
-  if (post.isArchived && Number(post.userId) !== Number(CURRENT_USER_ID)) {
+  const currentUserId = req.user?.id || req.userId || CURRENT_USER_ID;
+  if (post.isArchived && Number(post.userId) !== Number(currentUserId)) {
     return res
       .status(403)
       .json({ error: "Archived post can only be viewed by its author" });
   }
 
-  return res.json(formatPost(post, CURRENT_USER_ID));
+  return res.json(formatPost(post, currentUserId));
 });
 
 // POST /api/posts
@@ -436,10 +394,11 @@ app.post("/api/posts", (req, res) => {
   const { title, body, imageUrl } = req.body;
   if (!title) return res.status(400).json({ error: "Title is required" });
 
+  const currentUserId = getActiveUserId(req);
   const now = new Date().toISOString();
   const newPost = {
     id: Date.now(),
-    userId: CURRENT_USER_ID || 1,
+    userId: currentUserId,
     title,
     body: body || "",
     imageUrl: imageUrl || `https://picsum.photos/seed/${Date.now()}/600/350`,
@@ -453,7 +412,7 @@ app.post("/api/posts", (req, res) => {
   };
 
   posts.unshift(newPost);
-  return res.status(201).json(formatPost(newPost, CURRENT_USER_ID));
+  return res.status(201).json(formatPost(newPost, currentUserId));
 });
 
 // PUT /api/posts/:id (Edit Post)
@@ -461,7 +420,7 @@ app.put("/api/posts/:id", (req, res) => {
   const post = posts.find((p) => p.id === Number(req.params.id));
   if (!post) return res.status(404).json({ error: "Post not found" });
 
-  const currentUserId = CURRENT_USER_ID || 1;
+  const currentUserId = getActiveUserId(req);
   if (Number(post.userId) !== Number(currentUserId)) {
     return res
       .status(403)
@@ -483,7 +442,7 @@ app.post("/api/posts/:id/archive", (req, res) => {
   const post = posts.find((p) => p.id === Number(req.params.id));
   if (!post) return res.status(404).json({ error: "Post not found" });
 
-  const currentUserId = CURRENT_USER_ID || 1;
+  const currentUserId = getActiveUserId(req);
   if (Number(post.userId) !== Number(currentUserId)) {
     return res
       .status(403)
@@ -507,7 +466,7 @@ app.delete("/api/posts/:id", (req, res) => {
     return res.status(404).json({ error: "Post not found" });
 
   const post = posts[postIndex];
-  const currentUserId = CURRENT_USER_ID || 1;
+  const currentUserId = getActiveUserId(req);
   if (Number(post.userId) !== Number(currentUserId)) {
     return res
       .status(403)
@@ -529,7 +488,7 @@ app.post("/api/posts/:id/like", (req, res) => {
   const post = posts.find((p) => p.id === Number(req.params.id));
   if (!post) return res.status(404).json({ error: "Post not found" });
 
-  const userId = Number(req.body.userId || CURRENT_USER_ID || 1);
+  const userId = Number(req.body.userId || getActiveUserId(req));
   const likeIdx = post.likes.indexOf(userId);
 
   if (likeIdx > -1) {
@@ -548,7 +507,7 @@ app.post("/api/posts/:id/save", (req, res) => {
   const post = posts.find((p) => p.id === Number(req.params.id));
   if (!post) return res.status(404).json({ error: "Post not found" });
 
-  const userId = Number(req.body.userId || CURRENT_USER_ID || 1);
+  const userId = Number(req.body.userId || getActiveUserId(req));
   const saveIdx = post.savedBy.indexOf(userId);
 
   if (saveIdx > -1) {
@@ -580,7 +539,7 @@ app.post("/api/posts/:postId/comments", (req, res) => {
   const { body, name, email } = req.body;
   if (!body) return res.status(400).json({ error: "Comment body is required" });
 
-  const userId = CURRENT_USER_ID || 1;
+  const userId = getActiveUserId(req);
   const user = users.find((u) => u.id === userId);
 
   const newComment = {
@@ -834,7 +793,7 @@ const postPhotoUploadHandler = (req, res) => {
     fullUrl,
     filename: req.file.filename,
     size: req.file.size,
-    post: formatPost(post, CURRENT_USER_ID),
+    post: formatPost(post, getActiveUserId(req)),
   });
 };
 
@@ -886,6 +845,9 @@ app.use("/api", formRoutes);
 // ==========================================
 // Start Server
 // ==========================================
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Server running at http://localhost:${PORT}`);
 });
+
+export { app, server, users, posts, comments, sanitizeUser, getActiveUserId };
+export default app;
