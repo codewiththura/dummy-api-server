@@ -44,13 +44,6 @@ describe("Social App Mock Backend API Tests", () => {
     if (serverProcess) {
       serverProcess.kill("SIGTERM");
     }
-    // Clean up test upload files created during testing
-    try {
-      const testFile = new URL("../uploads/users/user-1.jpg", import.meta.url);
-      if (fs.existsSync(testFile)) {
-        fs.unlinkSync(testFile);
-      }
-    } catch {}
   });
 
   test("GET /api/users returns pre-seeded dummy users with userId 1", async () => {
@@ -130,7 +123,7 @@ describe("Social App Mock Backend API Tests", () => {
     assert.equal(data.error, "User not found");
   });
 
-  test("POST /api/users/:id/photo allows public upload and updates user avatar", async () => {
+  test("POST /api/users/:id/photo allows public upload and updates user avatar in Vercel Storage", async () => {
     const formData = new FormData();
     const fakeImage = new Blob(["fake-image-content"], { type: "image/jpeg" });
     formData.append("photo", fakeImage, "avatar.jpg");
@@ -142,10 +135,54 @@ describe("Social App Mock Backend API Tests", () => {
 
     assert.equal(res.status, 200);
     const data = await res.json();
-    assert.equal(data.message, "User profile photo uploaded successfully");
-    assert.ok(data.avatarUrl.startsWith("/uploads/users/user-1."));
-    assert.ok(data.fullUrl.includes("/uploads/users/user-1."));
+    assert.ok(data.message.includes("User profile photo uploaded successfully"));
+    assert.ok(data.avatarUrl.includes("blob.vercel-storage.com"));
+    assert.ok(data.fullUrl.includes("blob.vercel-storage.com"));
     assert.equal(data.user.id, 1);
+    assert.equal(data.user.avatarUrl, data.avatarUrl);
+
+    // Verify zero local files created on disk
+    const uploadsExist = fs.existsSync(new URL("../uploads", import.meta.url));
+    assert.equal(uploadsExist, false, "Local uploads directory must not be created on server disk");
+  });
+
+  test("POST /api/posts/:id/photo allows public upload and updates post image in Vercel Storage", async () => {
+    const formData = new FormData();
+    const fakeImage = new Blob(["post-image-content"], { type: "image/png" });
+    formData.append("image", fakeImage, "cover.png");
+
+    const res = await fetch(`${BASE_URL}/api/posts/1/photo`, {
+      method: "POST",
+      body: formData,
+    });
+
+    assert.equal(res.status, 200);
+    const data = await res.json();
+    assert.ok(data.message.includes("Post photo uploaded successfully"));
+    assert.ok(data.imageUrl.includes("blob.vercel-storage.com"));
+    assert.ok(data.fullUrl.includes("blob.vercel-storage.com"));
+    assert.equal(data.post.id, 1);
+    assert.equal(data.post.imageUrl, data.imageUrl);
+  });
+
+  test("DELETE /api/users/:id/photo removes profile photo", async () => {
+    const res = await fetch(`${BASE_URL}/api/users/1/photo`, {
+      method: "DELETE",
+    });
+
+    assert.equal(res.status, 200);
+    const data = await res.json();
+    assert.ok(data.message.includes("User profile photo removed successfully"));
+    assert.ok(data.user.avatarUrl.includes("pravatar.cc"));
+  });
+
+  test("GET /api/storage/status returns Vercel storage configuration and disabled server disk", async () => {
+    const res = await fetch(`${BASE_URL}/api/storage/status`);
+    assert.equal(res.status, 200);
+    const data = await res.json();
+    assert.equal(data.status, "ok");
+    assert.ok(data.provider.includes("vercel-blob"));
+    assert.ok(data.serverDiskStorage.includes("disabled"));
   });
 
   test("POST /api/forms/submit handles application/x-www-form-urlencoded HTML forms", async () => {

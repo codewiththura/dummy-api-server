@@ -2,7 +2,7 @@
 
 A modular, high-performance Node.js & Express mock backend API server designed specifically for **testing, frontend prototyping, mobile app development, and learning**.
 
-This server provides a zero-configuration, in-memory database pre-seeded with realistic dummy data (users, posts, comments), an intelligent **`userId: 1` default fallback mechanism** for friction-free testing without requiring login sessions, rate-limiting protection, and a storage-optimized photo upload system with deterministic ID-based overwriting.
+This server provides a zero-configuration, in-memory database pre-seeded with realistic dummy data (users, posts, comments), an intelligent **`userId: 1` default fallback mechanism** for friction-free testing without requiring login sessions, rate-limiting protection, and a **zero-server-disk photo upload system** for seamless, CDN-backed photo management.
 
 ---
 
@@ -18,14 +18,16 @@ This server provides a zero-configuration, in-memory database pre-seeded with re
   - [Why Default to User 1?](#why-default-to-user-1)
   - [Endpoints Utilizing the Fallback](#endpoints-utilizing-the-fallback)
   - [Authenticating as Another User](#authenticating-as-another-user)
-- [Image Upload & Handling Architecture](#image-upload--handling-architecture)
+- [Image Upload & Handling Architecture (Vercel Storage)](#image-upload--handling-architecture-vercel-storage)
+  - [Why Vercel Storage Over Server Disk?](#why-vercel-storage-over-server-disk)
   - [Allowed Image MIME Types](#allowed-image-mime-types)
   - [File Size Limits](#file-size-limits)
-  - [Storage Location & File Naming Convention](#storage-location--file-naming-convention)
-  - [Deterministic ID-Based Overwriting Strategy](#deterministic-id-based-overwriting-strategy)
+  - [Zero Server Disk Footprint Architecture](#zero-server-disk-footprint-architecture)
+  - [Automatic Blob Lifecycle & Overwrite Cleanup](#automatic-blob-lifecycle--overwrite-cleanup)
   - [Public Upload Access & Entity Validation](#public-upload-access--entity-validation)
   - [Accepted Multipart Form Field Names](#accepted-multipart-form-field-names)
-  - [Static File Serving & Response Format](#static-file-serving--response-format)
+  - [Vercel Storage Response Format](#vercel-storage-response-format)
+  - [Local Development & Mock Fallback Mode](#local-development--mock-fallback-mode)
 - [Form Testing & Echo System](#form-testing--echo-system)
   - [Zero-Validation & Zero-Persistence Model](#zero-validation--zero-persistence-model)
   - [Supported Content Types & Field Handling](#supported-content-types--field-handling)
@@ -37,6 +39,7 @@ This server provides a zero-configuration, in-memory database pre-seeded with re
 - [Tech Stack](#tech-stack)
 - [Prerequisites](#prerequisites)
 - [Environment Setup & Configuration](#environment-setup--configuration)
+  - [How to Obtain and Configure Vercel Blob Token (BLOB_READ_WRITE_TOKEN)](#how-to-obtain-and-configure-vercel-blob-token-blob_read_write_token)
 - [Step-by-Step Setup Guide](#step-by-step-setup-guide)
   - [Running Locally (Development)](#running-locally-development)
   - [Running with Docker (Containerized on VPS)](#running-with-docker-containerized-on-vps)
@@ -61,6 +64,7 @@ This server provides a zero-configuration, in-memory database pre-seeded with re
 When building frontend user interfaces (e.g., React, Next.js, Vue, Svelte) or mobile applications (React Native, Flutter, Swift, Kotlin), configuring and maintaining a live production database (such as PostgreSQL, MySQL, or MongoDB) introduces unnecessary complexity, migration overhead, and setup friction.
 
 The **Social App API Server** acts as a lightweight, zero-maintenance mock backend API:
+
 - **No external database required**: Runs entirely using in-memory JavaScript data structures.
 - **Pre-populated with rich mock data**: Out of the box, the server contains realistic profiles, avatars, feeds, likes, saves, and comments.
 - **Friction-free CRUD & interactions**: Features a built-in default user fallback (`userId: 1`) so developers and QA testers can immediately create, update, delete, like, save, or comment on posts without having to go through a login/token authentication flow first.
@@ -76,29 +80,30 @@ Upon server startup, the in-memory database is automatically populated with the 
 
 All pre-seeded test accounts share the default password: **`password123`**.
 
-| ID | Name | Username | Email | Default Avatar | Bio |
-| :---: | :--- | :--- | :--- | :--- | :--- |
-| **1** *(Default)* | Thura | `thura` | `thura@example.com` | `https://i.pravatar.cc/150?img=68` | Passionate React & Node.js Developer. |
-| **2** | May Thin | `maythin` | `maythin@example.com` | `https://i.pravatar.cc/150?u=maythin` | Frontend UI/UX enthusiast and technical writer. |
-| **3** | Zaw Min | `zawmin` | `zawmin@example.com` | `https://i.pravatar.cc/150?u=zawmin` | Fullstack engineer passionate about clean architecture. |
-| **4** | Hla Hla | `hlahla` | `hlahla@example.com` | `https://i.pravatar.cc/150?u=hlahla` | Mobile and Single Page Application enthusiast. |
-| **5** | Kyaw Thu | `kyawthu` | `kyawthu@example.com` | `https://i.pravatar.cc/150?u=kyawthu` | Software Architect & Tech Instructor. |
-| **6** | Su Su | `susu` | `susu@example.com` | `https://i.pravatar.cc/150?u=susu` | React and Next.js Frontend Developer. |
+|        ID         | Name     | Username  | Email                 | Default Avatar                        | Bio                                                     |
+| :---------------: | :------- | :-------- | :-------------------- | :------------------------------------ | :------------------------------------------------------ |
+| **1** _(Default)_ | Thura    | `thura`   | `thura@example.com`   | `https://i.pravatar.cc/150?img=68`    | Passionate React & Node.js Developer.                   |
+|       **2**       | May Thin | `maythin` | `maythin@example.com` | `https://i.pravatar.cc/150?u=maythin` | Frontend UI/UX enthusiast and technical writer.         |
+|       **3**       | Zaw Min  | `zawmin`  | `zawmin@example.com`  | `https://i.pravatar.cc/150?u=zawmin`  | Fullstack engineer passionate about clean architecture. |
+|       **4**       | Hla Hla  | `hlahla`  | `hlahla@example.com`  | `https://i.pravatar.cc/150?u=hlahla`  | Mobile and Single Page Application enthusiast.          |
+|       **5**       | Kyaw Thu | `kyawthu` | `kyawthu@example.com` | `https://i.pravatar.cc/150?u=kyawthu` | Software Architect & Tech Instructor.                   |
+|       **6**       | Su Su    | `susu`    | `susu@example.com`    | `https://i.pravatar.cc/150?u=susu`    | React and Next.js Frontend Developer.                   |
 
 ### Pre-Seeded Posts
 
 The initial feed includes 4 educational posts with author linkages, Unsplash cover images, and pre-existing like/save states:
 
-| Post ID | Author | Title | Pre-configured Likes | Initial Saved By |
-| :---: | :---: | :--- | :---: | :---: |
-| **1** | User 1 (Thura) | *Getting Started with React* | 4 likes (Users 2, 3, 4, 5) | User 2 |
-| **2** | User 2 (May Thin) | *Understanding useState Hook* | 3 likes (Users 1, 3, 4) | Users 1, 3 |
-| **3** | User 3 (Zaw Min) | *Props and Component Communication* | 4 likes (Users 1, 2, 4, 6) | User 2 |
-| **4** | User 4 (Hla Hla) | *React Router for Navigation* | 4 likes (Users 1, 2, 3, 5) | Users 1, 5 |
+| Post ID |      Author       | Title                               |    Pre-configured Likes    | Initial Saved By |
+| :-----: | :---------------: | :---------------------------------- | :------------------------: | :--------------: |
+|  **1**  |  User 1 (Thura)   | _Getting Started with React_        | 4 likes (Users 2, 3, 4, 5) |      User 2      |
+|  **2**  | User 2 (May Thin) | _Understanding useState Hook_       |  3 likes (Users 1, 3, 4)   |    Users 1, 3    |
+|  **3**  | User 3 (Zaw Min)  | _Props and Component Communication_ | 4 likes (Users 1, 2, 4, 6) |      User 2      |
+|  **4**  | User 4 (Hla Hla)  | _React Router for Navigation_       | 4 likes (Users 1, 2, 3, 5) |    Users 1, 5    |
 
 ### Pre-Seeded Comments
 
 Post 1 includes initial comments:
+
 - **Comment 101**: Authored by May Thin (User 2)
 - **Comment 102**: Authored by Zaw Min (User 3)
 
@@ -119,24 +124,26 @@ To provide the smoothest developer experience, **this API defaults to `userId: 1
 
 ### Endpoints Utilizing the Fallback
 
-| Operation | Endpoint | Fallback Behavior when Unauthenticated (`CURRENT_USER_ID === null`) |
-| :--- | :--- | :--- |
-| **Create Post** | `POST /api/posts` | Post author is automatically assigned as `userId: 1`. |
-| **Edit Post** | `PUT /api/posts/:id` | Authorization checks `post.userId === (CURRENT_USER_ID \|\| 1)`, permitting direct edits to Post 1 (owned by User 1). |
-| **Archive Post** | `POST /api/posts/:id/archive` | Authorization checks `post.userId === (CURRENT_USER_ID \|\| 1)`, permitting User 1 to archive/unarchive their posts. |
-| **Delete Post** | `DELETE /api/posts/:id` | Authorization checks `post.userId === (CURRENT_USER_ID \|\| 1)`, permitting User 1 to delete their posts. |
-| **Like / Unlike Post** | `POST /api/posts/:id/like` | Identifies user via `req.body.userId \|\| CURRENT_USER_ID \|\| 1`. Allows unauthenticated clients to toggle likes as User 1, or pass any custom `userId` in the body. |
-| **Save / Unsave Post** | `POST /api/posts/:id/save` | Identifies user via `req.body.userId \|\| CURRENT_USER_ID \|\| 1`. Allows unauthenticated clients to toggle saves as User 1. |
-| **Add Comment** | `POST /api/posts/:postId/comments` | Assigns comment `userId: CURRENT_USER_ID \|\| 1`. If `name` or `email` are omitted in the body, it auto-fills with User 1's profile details (`"Thura"`, `"thura@example.com"`). |
+| Operation              | Endpoint                           | Fallback Behavior when Unauthenticated (`CURRENT_USER_ID === null`)                                                                                                             |
+| :--------------------- | :--------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Create Post**        | `POST /api/posts`                  | Post author is automatically assigned as `userId: 1`.                                                                                                                           |
+| **Edit Post**          | `PUT /api/posts/:id`               | Authorization checks `post.userId === (CURRENT_USER_ID \|\| 1)`, permitting direct edits to Post 1 (owned by User 1).                                                           |
+| **Archive Post**       | `POST /api/posts/:id/archive`      | Authorization checks `post.userId === (CURRENT_USER_ID \|\| 1)`, permitting User 1 to archive/unarchive their posts.                                                            |
+| **Delete Post**        | `DELETE /api/posts/:id`            | Authorization checks `post.userId === (CURRENT_USER_ID \|\| 1)`, permitting User 1 to delete their posts.                                                                       |
+| **Like / Unlike Post** | `POST /api/posts/:id/like`         | Identifies user via `req.body.userId \|\| CURRENT_USER_ID \|\| 1`. Allows unauthenticated clients to toggle likes as User 1, or pass any custom `userId` in the body.           |
+| **Save / Unsave Post** | `POST /api/posts/:id/save`         | Identifies user via `req.body.userId \|\| CURRENT_USER_ID \|\| 1`. Allows unauthenticated clients to toggle saves as User 1.                                                    |
+| **Add Comment**        | `POST /api/posts/:postId/comments` | Assigns comment `userId: CURRENT_USER_ID \|\| 1`. If `name` or `email` are omitted in the body, it auto-fills with User 1's profile details (`"Thura"`, `"thura@example.com"`). |
 
 ### Authenticating & Token-Based Authorization
 
 The authentication system aligns directly with the **Social App Demo** backend (`express-social-server`):
+
 - Login responses return `{ user, token }` containing the sanitized user profile and a signed HMAC-SHA256 JWT.
 - Routes are mounted under both `/api/auth/*` and `/auth/*` to support frontends regardless of whether `VITE_API_URL` includes a trailing `/api`.
 - Client requests can supply the token in the `Authorization: Bearer <token>` header (or `x-access-token`), and the server resolves `req.user` accordingly.
 
 #### Quick Flow:
+
 1. Call `POST /api/auth/login` (or `POST /auth/login`) with credentials:
    ```json
    { "email": "maythin@example.com", "password": "password123" }
@@ -164,25 +171,33 @@ The authentication system aligns directly with the **Social App Demo** backend (
 
 ---
 
-## Image Upload & Handling Architecture
+## Image Upload & Handling Architecture (Vercel Storage)
 
-The server incorporates an image upload subsystem powered by [Multer](https://github.com/expressjs/multer) with custom storage engines, strict MIME validation, file size limits, and disk-space optimization.
+The photo upload subsystem has been modernized from legacy server disk storage to **Vercel Storage ([Vercel Blob](https://vercel.com/storage/blob))**. Uploads are processed entirely in memory via [Multer](https://github.com/expressjs/multer) and streamed directly to Vercel's distributed cloud blob storage, eliminating server disk usage.
+
+### Why Vercel Storage Over Server Disk?
+
+1. **Zero Host Server Disk Consumption**: Storing photos on local VPS disks or container layers risks exhausting storage, complicating backups, and creating orphaned files. With Vercel Storage, host disk usage is **`0 MB`**.
+2. **Stateless Containers & Serverless Readiness**: The API server is completely stateless. It can be deployed, scaled across multiple nodes, or moved between VPS and serverless platforms without persistent disk volume mounts (`VOLUME [".../uploads"]`).
+3. **Global Edge CDN Performance**: Images uploaded to Vercel Blob are instantly distributed worldwide via Vercel's Edge CDN (`https://<store-id>.public.blob.vercel-storage.com/...`), resulting in faster asset delivery and zero asset-serving bandwidth overhead on the API server.
+4. **Automated Blob Lifecycle & Cleanup**: The server monitors old photo URLs and automatically removes superseded or deleted photos from Vercel Storage via the `@vercel/blob` SDK (`del()`), preventing storage bloat.
 
 ### Allowed Image MIME Types
 
 To maintain security and prevent arbitrary file uploads, only standard image formats are permitted:
 
-| MIME Type | Supported File Extensions | Category | Status |
-| :--- | :--- | :--- | :---: |
-| `image/jpeg` | `.jpg`, `.jpeg` | JPEG Image | Allowed |
-| `image/jpg` | `.jpg` | JPEG Image (variant) | Allowed |
-| `image/png` | `.png` | Portable Network Graphics | Allowed |
-| `image/gif` | `.gif` | Graphics Interchange Format | Allowed |
-| `image/webp` | `.webp` | WebP Modern Image Format | Allowed |
-| `image/svg+xml` | `.svg` | Scalable Vector Graphics | Allowed |
+| MIME Type       | Supported File Extensions | Category                    | Status  |
+| :-------------- | :------------------------ | :-------------------------- | :-----: |
+| `image/jpeg`    | `.jpg`, `.jpeg`           | JPEG Image                  | Allowed |
+| `image/jpg`     | `.jpg`                    | JPEG Image (variant)        | Allowed |
+| `image/png`     | `.png`                    | Portable Network Graphics   | Allowed |
+| `image/gif`     | `.gif`                    | Graphics Interchange Format | Allowed |
+| `image/webp`    | `.webp`                   | WebP Modern Image Format    | Allowed |
+| `image/svg+xml` | `.svg`                    | Scalable Vector Graphics    | Allowed |
 
 > [!WARNING]
 > **MIME Type Enforcement**: Any upload with an unlisted MIME type (e.g., `application/pdf`, `video/mp4`, `text/plain`, `application/zip`) is immediately rejected with HTTP status **`400 Bad Request`**:
+>
 > ```json
 > {
 >   "error": "Invalid file type. Only image files (JPG, PNG, GIF, WEBP, SVG) are allowed."
@@ -199,82 +214,77 @@ To maintain security and prevent arbitrary file uploads, only standard image for
   }
   ```
 
-### Storage Location & File Naming Convention
+### Zero Server Disk Footprint Architecture
 
-Uploaded files are stored outside the source code tree in a dedicated `uploads` directory:
+The server configures Multer using `multer.memoryStorage()`. When a client uploads a file:
 
-```text
-social-app-api-server/
-├── uploads/
-│   ├── users/            <-- User profile avatars
-│   │   ├── user-1.jpg
-│   │   └── user-2.png
-│   └── posts/            <-- Post cover images
-│       ├── post-1.jpg
-│       └── post-2.webp
-```
+1. Multer holds the image in a memory `Buffer` during the request lifecycle.
+2. The storage service (`services/storageService.js`) uploads the buffer to Vercel Blob via `@vercel/blob`'s `put()`.
+3. Once the upload finishes and response is returned, the buffer is freed by Node.js garbage collection.
+4. **No files or folders are created on the server disk**. The legacy `uploads/` directory has been completely removed.
 
-- **User Profile Avatars**: Saved as `uploads/users/user-<userId>.<ext>`
-- **Post Photos**: Saved as `uploads/posts/post-<postId>.<ext>`
+### Automatic Blob Lifecycle & Overwrite Cleanup
 
-### Deterministic ID-Based Overwriting Strategy
+To keep cloud storage clean and cost-efficient:
 
-On resource-constrained environments (such as low-cost VPS instances or containerized nodes), user photo uploads can rapidly consume disk storage with abandoned, orphaned files.
-
-To solve this:
-1. When a new photo is uploaded for entity ID `X`, the helper function `removeExistingFiles()` searches the destination folder for any file matching the pattern:
-   ```regex
-   ^<prefix>-<id>\.[a-zA-Z0-9]+$
-   ```
-2. Any matching existing file (e.g., `user-1.png`) is unlinked and deleted from disk before the new file (e.g., `user-1.jpg`) is written.
-3. **Zero Orphaned Files**: Even if a user updates their picture from a PNG to a JPG or WEBP, the old format is deleted, guaranteeing exactly one image file per user ID and post ID on disk at all times.
+1. **Photo Update Overwrite**: When a user uploads a new avatar or a post photo is updated, the server checks if the previous image was hosted on Vercel Blob (`isVercelBlobUrl()`). If so, it issues a non-blocking `del()` call to delete the old blob.
+2. **Entity Deletion Cleanup**: When a user is deleted (`DELETE /api/users/:id`) or a post is deleted (`DELETE /api/posts/:id`), any associated Vercel Blob asset is automatically deleted from cloud storage.
+3. **Explicit Photo Deletion Endpoints**: Dedicated endpoints (`DELETE /api/users/:id/photo` and `DELETE /api/posts/:id/photo`) allow clients to remove photos without deleting the entity.
 
 ### Public Upload Access & Entity Validation
 
-- **Is Public Upload Allowed?**: **Yes**. Because this server is tailored for frontend testing and sandbox experimentation, upload endpoints do **not** require authentication headers, tokens, or cookies. Any client, frontend application, or Postman tester can upload photos.
+- **Public Upload Access**: Upload endpoints do not require authentication tokens, making them ideal for rapid frontend prototyping, mobile app testing, and Postman experimentation.
 - **Entity Existence Validation Guard**:
-  Before saving any file to disk, the server checks whether the target entity actually exists:
+  Before processing the upload, the server validates the entity:
   - If `:id` is not a valid number: Returns `400 Bad Request` (`{"error": "Invalid user ID"}` or `{"error": "Invalid post ID"}`).
   - If the user or post is not found in memory: Returns `404 Not Found` (`{"error": "User not found"}` or `{"error": "Post not found"}`).
-  - Only if the entity is validated does Multer process and save the file.
+  - Upload to Vercel Blob is only initiated after confirming the entity exists.
 
 ### Accepted Multipart Form Field Names
 
-To eliminate frustration when switching between HTTP clients or frontend libraries, the upload middleware accepts any of the following multipart form field keys:
+To eliminate friction when switching between frontend upload libraries (e.g. `axios`, `fetch`, `react-native`, or `Postman`), the upload middleware accepts any of the following multipart form field keys:
+
 - `photo`
 - `image`
 - `avatar`
 - `file`
 
 If no file is attached under one of these keys, the server returns:
+
 ```json
 {
   "error": "No image file uploaded. Please send a file with field name 'photo', 'image', 'avatar', or 'file'."
 }
 ```
 
-### Static File Serving & Response Format
+### Vercel Storage Response Format
 
-All uploads are served statically by Express under the `/uploads` route:
-- User Avatars: `http://<host>:5000/uploads/users/user-<id>.<ext>`
-- Post Images: `http://<host>:5000/uploads/posts/post-<id>.<ext>`
+When an upload succeeds, the server returns the direct Vercel Blob CDN URL along with entity metadata:
 
-When an upload succeeds, the server returns both relative and absolute URLs alongside entity metadata:
 ```json
 {
-  "message": "User profile photo uploaded successfully",
-  "avatarUrl": "/uploads/users/user-1.jpg",
-  "fullUrl": "http://localhost:5000/uploads/users/user-1.jpg",
-  "filename": "user-1.jpg",
+  "message": "User profile photo uploaded successfully to Vercel storage",
+  "avatarUrl": "https://r94m1c8s2y.public.blob.vercel-storage.com/users/user-1-k7p9m2a.jpg",
+  "fullUrl": "https://r94m1c8s2y.public.blob.vercel-storage.com/users/user-1-k7p9m2a.jpg",
+  "pathname": "users/user-1-k7p9m2a.jpg",
   "size": 45210,
+  "storage": "vercel-blob",
   "user": {
     "id": 1,
     "name": "Thura",
-    "avatarUrl": "/uploads/users/user-1.jpg",
-    "updatedAt": "2026-10-18T12:00:00.000Z"
+    "avatarUrl": "https://r94m1c8s2y.public.blob.vercel-storage.com/users/user-1-k7p9m2a.jpg",
+    "updatedAt": "2026-11-15T23:30:00.000Z"
   }
 }
 ```
+
+### Local Development & Mock Fallback Mode
+
+To ensure developers and CI/CD pipelines can run tests and develop offline without needing a real Vercel Blob account or internet connection:
+
+- If `BLOB_READ_WRITE_TOKEN` is set: The server connects to real Vercel Blob Storage (`provider: "vercel-blob"`).
+- If `BLOB_READ_WRITE_TOKEN` is unset: The server activates the built-in mock blob provider (`provider: "mock-vercel-blob"`). It simulates the Vercel Blob URL structure, manages blobs in memory, and allows 100% of the upload and delete workflows to be tested offline without throwing credential errors.
+- You can inspect the active storage provider anytime via `GET /api/storage/status`.
 
 ---
 
@@ -283,6 +293,7 @@ When an upload succeeds, the server returns both relative and absolute URLs alon
 Building forms in web and mobile applications often requires verifying that input fields, checkboxes, select menus, arrays, nested keys, and file attachments are sent correctly by the client. However, typical API endpoints enforce strict schema validation, require authenticated user sessions, and write data into databases.
 
 To provide a dedicated sandbox for form testing, the server includes dedicated form testing endpoints:
+
 - `POST /api/forms/submit` (primary)
 - `POST /api/forms/test` (alias)
 - `POST /api/form-submit` (alias)
@@ -297,16 +308,17 @@ To provide a dedicated sandbox for form testing, the server includes dedicated f
 
 The route automatically detects and parses all standard HTML and JavaScript form submission formats:
 
-| Content-Type | Client Method | Field Types Handled |
-| :--- | :--- | :--- |
-| **`application/x-www-form-urlencoded`** | Raw HTML `<form method="POST">` | Text inputs, passwords, numbers, radios, checkboxes (`"on"`/`"true"`), arrays (`tags[]`), nested objects (`profile[bio]`). |
-| **`application/json`** | JS `fetch()`, `axios`, Postman | Strings, numbers, booleans, nested objects, and arrays. |
-| **`multipart/form-data`** | `<form enctype="multipart/form-data">` or `new FormData()` | Text fields alongside file attachments. |
-| **URL Query Parameters** | `<form method="GET">` or query strings | Parsed from `req.query` if request body is empty. |
+| Content-Type                            | Client Method                                              | Field Types Handled                                                                                                        |
+| :-------------------------------------- | :--------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------- |
+| **`application/x-www-form-urlencoded`** | Raw HTML `<form method="POST">`                            | Text inputs, passwords, numbers, radios, checkboxes (`"on"`/`"true"`), arrays (`tags[]`), nested objects (`profile[bio]`). |
+| **`application/json`**                  | JS `fetch()`, `axios`, Postman                             | Strings, numbers, booleans, nested objects, and arrays.                                                                    |
+| **`multipart/form-data`**               | `<form enctype="multipart/form-data">` or `new FormData()` | Text fields alongside file attachments.                                                                                    |
+| **URL Query Parameters**                | `<form method="GET">` or query strings                     | Parsed from `req.query` if request body is empty.                                                                          |
 
 ### Memory-Safe File Attachments
 
 When testing file inputs (`<input type="file">`):
+
 - Uploaded files are processed in-memory using `multer.memoryStorage()`.
 - **Zero Disk Footprint**: Files are **never written to disk**, preventing VPS or test server disk exhaustion.
 - **Limits**: Up to **10 files** per submission, max **10 MB** per file.
@@ -348,12 +360,17 @@ By default, the server returns a clean JSON inspection response:
 If testers are submitting directly from a raw HTML form in a web browser without JavaScript, they can append **`?format=html`** to the form's `action` attribute:
 
 ```html
-<form action="http://localhost:5000/api/forms/submit?format=html" method="POST" enctype="multipart/form-data">
+<form
+  action="http://localhost:5000/api/forms/submit?format=html"
+  method="POST"
+  enctype="multipart/form-data"
+>
   <!-- fields -->
 </form>
 ```
 
 When submitted, the browser will render a sleek, responsive visual report containing:
+
 - Badges and metadata overview (HTTP method, content type, timestamp)
 - Formatted table of all submitted text and input fields with detected types
 - Formatted table of attached files with original names, MIME types, and sizes
@@ -405,10 +422,10 @@ When submitted, the browser will render a sleek, responsive visual report contai
 
 ## Rate Limiting Architecture
 
-| Limiter Scope | Target Endpoints | Window Duration | Max Requests | Limit Exceeded Status |
-| :--- | :--- | :--- | :---: | :--- |
-| **Global Limiter** | `/api/*` | 1 minute (60,000 ms) | 80 / IP | `429 Too Many Requests` |
-| **Auth Limiter** | `/api/auth/login`, `/api/auth/register` | 1 minute (60,000 ms) | 30 / IP | `429 Too Many Requests` |
+| Limiter Scope      | Target Endpoints                        | Window Duration      | Max Requests | Limit Exceeded Status   |
+| :----------------- | :-------------------------------------- | :------------------- | :----------: | :---------------------- |
+| **Global Limiter** | `/api/*`                                | 1 minute (60,000 ms) |   80 / IP    | `429 Too Many Requests` |
+| **Auth Limiter**   | `/api/auth/login`, `/api/auth/register` | 1 minute (60,000 ms) |   30 / IP    | `429 Too Many Requests` |
 
 ### HTTP Headers Returned
 
@@ -435,8 +452,10 @@ When submitted, the browser will render a sleek, responsive visual report contai
 
 - **Runtime**: Node.js (ES Modules `type: "module"`)
 - **Web Framework**: Express.js (v5)
-- **Multipart Upload**: Multer (v2) with custom disk storage and ID overwrite logic
-- **Middleware**: CORS, Express JSON Body Parser, Custom Rate Limiter, Static File Serving
+- **Cloud Storage**: Vercel Storage ([`@vercel/blob`](https://vercel.com/storage/blob))
+- **Multipart Upload**: Multer (v2) with zero-disk `memoryStorage()`
+- **Authentication**: JWT (`crypto` native HMAC-SHA256 tokens)
+- **Middleware**: CORS, Express JSON Body Parser, Rate Limiter
 
 ---
 
@@ -445,14 +464,96 @@ When submitted, the browser will render a sleek, responsive visual report contai
 - **Node.js**: v18.0.0 or higher (v20+ recommended)
 - **npm**: v9.0.0 or higher
 - **Docker**: (Optional) For containerized VPS deployment
+- **Vercel Account**: (Optional) For production Vercel Blob token (`BLOB_READ_WRITE_TOKEN`)
 
 ---
 
 ## Environment Setup & Configuration
 
 - **`PORT`**: Port number for HTTP server (default: `5000`).
+- **`BLOB_READ_WRITE_TOKEN`**: Vercel Blob Storage read/write token.
+  - In production / deployed containers: Required for storing images on Vercel's global CDN.
+  - In local development / offline testing: When unset, the server automatically switches to an in-memory mock blob provider (`mock-vercel-blob`) without errors.
 - **CORS**: Enabled for all origins by default for easy cross-origin frontend testing.
-- **Upload Directories**: `./uploads/users` and `./uploads/posts` are automatically verified and created on startup.
+- **Server Disk Footprint**: **`0 MB`**. No local upload folders or disk volumes are required.
+
+### How to Obtain and Configure Vercel Blob Token (`BLOB_READ_WRITE_TOKEN`)
+
+#### 1. Obtain Token from Vercel Dashboard
+
+1. Log in to [Vercel Dashboard](https://vercel.com/dashboard).
+2. Go to the **Storage** tab in your dashboard (or open your project and click **Storage**).
+3. Click **Create Store** (or **Create Database**), then select **Blob**.
+4. Choose a store name (e.g. `social-app-blob`), select your preferred region, and click **Create**.
+5. Once created, click on your Blob store and open the **.env.local** tab (or **Quickstart** tab).
+6. Copy the value of `BLOB_READ_WRITE_TOKEN`:
+   ```bash
+   BLOB_READ_WRITE_TOKEN="vercel_blob_rw_..."
+   ```
+
+#### 2. Configure for Automated CI/CD (GitHub Actions)
+
+If you deploy automatically via GitHub Actions:
+
+1. Go to your GitHub repository -> **Settings** -> **Secrets and variables** -> **Actions**.
+2. Click **New repository secret**.
+3. Name: `BLOB_READ_WRITE_TOKEN`
+4. Secret: Paste your `vercel_blob_rw_...` token.
+5. Click **Add secret**.
+6. When pushing to `main` (or running workflow dispatch), GitHub Actions automatically passes `-e BLOB_READ_WRITE_TOKEN=...` directly into your Docker container on the VPS.
+
+#### 3. Configure Directly on the VPS (Manual Docker / Environment File)
+
+For manual deployments directly on your VPS, store secrets in a secure file rather than terminal history:
+
+```bash
+# 1. Create a secure configuration file on VPS
+mkdir -p ~/social-app
+cat << 'EOF' > ~/social-app/.env
+PORT=5000
+BLOB_READ_WRITE_TOKEN="vercel_blob_rw_your_actual_token_here"
+EOF
+
+# 2. Restrict file permissions for security
+chmod 600 ~/social-app/.env
+
+# 3. Launch container with --env-file
+docker run -d \
+  --name social-app-api \
+  --network telegram-bot-v1_default \
+  -p 5000:5000 \
+  --env-file ~/social-app/.env \
+  --restart unless-stopped \
+  ghcr.io/codewiththura/social-app-api-server:latest
+```
+
+#### 4. Verify Active Storage Configuration
+
+After deploying, test that Vercel Storage is live:
+
+```bash
+curl http://localhost:5000/api/storage/status
+```
+
+Expected response:
+
+```json
+{
+  "status": "ok",
+  "provider": "vercel-blob",
+  "configured": true,
+  "serverDiskStorage": "disabled (zero disk footprint)",
+  "allowedMimes": [
+    "image/jpeg",
+    "image/jpg",
+    "image/png",
+    "image/gif",
+    "image/webp",
+    "image/svg+xml"
+  ],
+  "maxFileSizeBytes": 5242880
+}
+```
 
 ---
 
@@ -461,25 +562,41 @@ When submitted, the browser will render a sleek, responsive visual report contai
 ### Running Locally (Development)
 
 1. Clone or navigate to the repository directory:
+
    ```bash
    cd social-app-api-server
    ```
 
 2. Install dependencies:
+
    ```bash
    npm install
    ```
 
-3. Start the API server:
+3. (Optional) Configure live Vercel Blob storage for local testing:
+   Create a `.env.local` file in the project root:
+
    ```bash
-   node server.js
+   echo 'BLOB_READ_WRITE_TOKEN="vercel_blob_rw_..."' > .env.local
    ```
 
-4. The server will start and listen at `http://localhost:5000`.
+   > [!NOTE]
+   > **Automatic Loading & Mock Fallback**: The server automatically detects and loads `.env.local` on startup. If `.env.local` is not present, it gracefully falls back to the in-memory mock mode (`mock-vercel-blob`) so you can test all upload workflows offline without any setup. `.env.local` is already in `.gitignore` so your secret token will never be committed.
+
+4. Start the API server:
+
+   ```bash
+   npm run dev    # Launches server with automatic hot-reload (Node.js --watch)
+   # or
+   npm start      # Standard startup (node server.js)
+   ```
+
+5. The server will start and listen at `http://localhost:5000`.
 
 ### Running Automated Tests
 
 Run the native Node test runner to validate API endpoints, dummy seed data, unauthenticated `userId: 1` fallback, and image upload validation:
+
 ```bash
 npm test
 ```
@@ -489,27 +606,29 @@ npm test
 ### Running with Docker (Containerized on VPS)
 
 1. Build the Docker image:
+
    ```bash
    docker build -t social-app-api .
    ```
 
-2. Run the container with a persistent volume for uploaded photos:
+2. Run the stateless container:
+
    ```bash
    docker run -d \
-     --name social-app-api-container \
+     --name social-app-api \
      -p 5000:5000 \
-     -v $(pwd)/uploads:/usr/src/app/uploads \
+     -e BLOB_READ_WRITE_TOKEN="vercel_blob_rw_..." \
      --restart unless-stopped \
      social-app-api
    ```
 
-   > [!IMPORTANT]
-   > **Volume Binding**: Binding `$(pwd)/uploads` on the host to `/usr/src/app/uploads` inside the container guarantees uploaded images survive container restarts and updates.
+   > [!TIP]
+   > **Stateless Container Advantage**: Photos are streamed directly to Vercel Storage. No host volume bindings (`-v $(pwd)/uploads:...`) are needed, eliminating disk consumption on your VPS and making container updates 100% safe.
 
 3. Verify container status:
    ```bash
    docker ps
-   docker logs -f social-app-api-container
+   docker logs -f social-app-api
    ```
 
 ---
@@ -526,14 +645,14 @@ git pull origin main
 docker build -t social-app-api .
 
 # 3. Stop and replace the container
-docker stop social-app-api-container
-docker rm social-app-api-container
+docker stop social-app-api
+docker rm social-app-api
 
-# 4. Restart container with uploads volume preserved
+# 4. Restart container
 docker run -d \
-  --name social-app-api-container \
+  --name social-app-api \
   -p 5000:5000 \
-  -v $(pwd)/uploads:/usr/src/app/uploads \
+  -e BLOB_READ_WRITE_TOKEN="vercel_blob_rw_..." \
   --restart unless-stopped \
   social-app-api
 ```
@@ -547,9 +666,10 @@ This repository is equipped with an automated CI/CD pipeline powered by **GitHub
 #### Automated CI/CD Pipeline (GitHub Actions)
 
 Whenever new code is pushed to the `main` branch (or triggered manually via `workflow_dispatch` in the GitHub Actions UI):
+
 1. **Automated Test Stage**:
    - Spawns an isolated `ubuntu-latest` runner with Node.js 20.
-   - Executes `npm ci` followed by `npm test` to validate all core API contracts, default `userId: 1` fallbacks, and photo upload filters.
+   - Executes `npm ci` followed by `npm test` to validate all core API contracts, default `userId: 1` fallbacks, storage services, and photo upload filters.
 2. **Docker Build & Publish Stage**:
    - Runs only after tests pass successfully.
    - Sets up Docker Buildx with GitHub Actions layer caching (`type=gha`) for fast builds.
@@ -560,18 +680,19 @@ Whenever new code is pushed to the `main` branch (or triggered manually via `wor
    - Pushes the resulting container image to GHCR.
 3. **Automated SSH Remote Deploy Stage (Zero-Touch)**:
    - Authenticates directly into your VPS via SSH (`appleboy/ssh-action`).
-   - Pulls the newly built image, swaps the running container gracefully with persistent upload volume bindings (`~/social-app/uploads`), and removes old unused images (`docker image prune`).
+   - Pulls the newly built image, swaps the running container gracefully with zero downtime, injected with `BLOB_READ_WRITE_TOKEN`, and removes old unused images (`docker image prune`).
 
 #### Required GitHub Repository Secrets
 
 Configure the following secrets in **Settings** &gt; **Secrets and variables** &gt; **Actions**:
 
-| Secret Name | Description | Example |
-| :--- | :--- | :--- |
-| `VPS_HOST` | VPS Public IP address | `118.27.150.81` |
-| `VPS_USERNAME` | SSH username on VPS | `debian` |
-| `VPS_SSH_KEY` | SSH Private key (`~/.ssh/github_actions_deploy`) | `-----BEGIN OPENSSH PRIVATE KEY-----...` |
-| `VPS_PORT` | SSH Port (optional, defaults to 22) | `22` |
+| Secret Name             | Description                                      | Example                                  |
+| :---------------------- | :----------------------------------------------- | :--------------------------------------- |
+| `VPS_HOST`              | VPS Public IP address                            | `118.27.150.81`                          |
+| `VPS_USERNAME`          | SSH username on VPS                              | `debian`                                 |
+| `VPS_SSH_KEY`           | SSH Private key (`~/.ssh/github_actions_deploy`) | `-----BEGIN OPENSSH PRIVATE KEY-----...` |
+| `VPS_PORT`              | SSH Port (optional, defaults to 22)              | `22`                                     |
+| `BLOB_READ_WRITE_TOKEN` | Vercel Blob Read/Write Storage token             | `vercel_blob_rw_...`                     |
 
 > [!NOTE]
 > **GitHub Package Visibility**: In your GitHub repository under **Packages** &gt; **Package Settings**, ensure the package visibility is set to **Public** so your VPS can pull images seamlessly without requiring manual token logins.
@@ -590,24 +711,21 @@ IMAGE_NAME="ghcr.io/codewiththura/social-app-api-server:latest"
 # 3. Pull the latest image built by GitHub Actions
 docker pull $IMAGE_NAME
 
-# 4. Ensure persistent upload folders exist on host
-mkdir -p uploads/users uploads/posts
+# 4. Stop and remove existing container
+docker stop social-app-api || true
+docker rm social-app-api || true
 
-# 5. Stop and remove existing container
-docker stop social-app-api-container || true
-docker rm social-app-api-container || true
-
-# 6. Run container with persistent uploads volume
+# 5. Run stateless container with Vercel Blob token
 docker run -d \
-  --name social-app-api-container \
+  --name social-app-api \
   -p 5000:5000 \
-  -v $(pwd)/uploads:/usr/src/app/uploads \
+  -e BLOB_READ_WRITE_TOKEN="vercel_blob_rw_..." \
   --restart unless-stopped \
   $IMAGE_NAME
 
-# 7. Check container status & logs
+# 6. Check container status & logs
 docker ps
-docker logs -f social-app-api-container
+docker logs -f social-app-api
 ```
 
 #### Manual Build & Push Alternative
@@ -638,6 +756,7 @@ All endpoints return standard HTTP status codes (`200 OK`, `201 Created`, `400 B
 ### Authentication Endpoints
 
 #### 1. Register Account — `POST /api/auth/register`
+
 - **Access**: Public
 - **Rate Limit**: 30 req / min
 - **Request Body**:
@@ -668,6 +787,7 @@ All endpoints return standard HTTP status codes (`200 OK`, `201 Created`, `400 B
   - `400 Bad Request`: `{"error": "Email and password are required"}` or `{"error": "Email already registered"}`
 
 #### 2. Log In — `POST /api/auth/login` (or `POST /auth/login`)
+
 - **Access**: Public
 - **Rate Limit**: 30 req / min
 - **Request Body**:
@@ -699,6 +819,7 @@ All endpoints return standard HTTP status codes (`200 OK`, `201 Created`, `400 B
   - `400 Bad Request`: `{"error": "Email and password are required", "message": "Email and password are required"}`
 
 #### 3. Get Current User Profile — `GET /api/auth/me` (or `GET /auth/me`)
+
 - **Access**: Logged In (via `Authorization: Bearer <token>` or active session)
 - **Rate Limit**: 80 req / min
 - **Headers (Optional / Recommended)**:
@@ -721,6 +842,7 @@ All endpoints return standard HTTP status codes (`200 OK`, `201 Created`, `400 B
   - `401 Unauthorized`: `{"error": "Not authenticated", "message": "Authentication required"}`
 
 #### 4. Log Out — `POST /api/auth/logout` (or `POST /auth/logout`)
+
 - **Access**: Public
 - **Response (`200 OK`)**:
   ```json
@@ -734,6 +856,7 @@ All endpoints return standard HTTP status codes (`200 OK`, `201 Created`, `400 B
 ### Posts Endpoints
 
 #### 1. List Posts — `GET /api/posts`
+
 - **Access**: Public
 - **Query Parameters**:
   - `userId` (optional): Filter posts by specific author ID (e.g. `?userId=2`).
@@ -766,6 +889,7 @@ All endpoints return standard HTTP status codes (`200 OK`, `201 Created`, `400 B
   ```
 
 #### 2. Get Post Details — `GET /api/posts/:id`
+
 - **Access**: Public (Author only if archived)
 - **Response (`200 OK`)**:
   ```json
@@ -796,6 +920,7 @@ All endpoints return standard HTTP status codes (`200 OK`, `201 Created`, `400 B
   - `403 Forbidden`: `{"error": "Archived post can only be viewed by its author"}`
 
 #### 3. Create Post — `POST /api/posts`
+
 - **Access**: Public (Defaults to `userId: 1` if not logged in)
 - **Request Body**:
   ```json
@@ -833,6 +958,7 @@ All endpoints return standard HTTP status codes (`200 OK`, `201 Created`, `400 B
   - `400 Bad Request`: `{"error": "Title is required"}`
 
 #### 4. Update Post — `PUT /api/posts/:id`
+
 - **Access**: Post Author (Defaults to `userId: 1`)
 - **Request Body**:
   ```json
@@ -870,6 +996,7 @@ All endpoints return standard HTTP status codes (`200 OK`, `201 Created`, `400 B
   - `403 Forbidden`: `{"error": "Unauthorized: You can only edit your own posts"}`
 
 #### 5. Archive / Unarchive Post — `POST /api/posts/:id/archive`
+
 - **Access**: Post Author (Defaults to `userId: 1`)
 - **Request Body (optional)**:
   ```json
@@ -877,7 +1004,7 @@ All endpoints return standard HTTP status codes (`200 OK`, `201 Created`, `400 B
     "isArchived": true
   }
   ```
-  *(If omitted, toggles current archive status)*
+  _(If omitted, toggles current archive status)_
 - **Response (`200 OK`)**:
   ```json
   {
@@ -896,6 +1023,7 @@ All endpoints return standard HTTP status codes (`200 OK`, `201 Created`, `400 B
   ```
 
 #### 6. Delete Post — `DELETE /api/posts/:id`
+
 - **Access**: Post Author (Defaults to `userId: 1`)
 - **Response (`200 OK`)**:
   ```json
@@ -920,6 +1048,7 @@ All endpoints return standard HTTP status codes (`200 OK`, `201 Created`, `400 B
   - `403 Forbidden`: `{"error": "Unauthorized: You can only delete your own posts"}`
 
 #### 7. Like / Unlike Post — `POST /api/posts/:id/like`
+
 - **Access**: Public
 - **Request Body (optional)**:
   ```json
@@ -927,7 +1056,7 @@ All endpoints return standard HTTP status codes (`200 OK`, `201 Created`, `400 B
     "userId": 2
   }
   ```
-  *(Defaults to active user or `userId: 1` if omitted)*
+  _(Defaults to active user or `userId: 1` if omitted)_
 - **Response (`200 OK`)**:
   ```json
   {
@@ -946,6 +1075,7 @@ All endpoints return standard HTTP status codes (`200 OK`, `201 Created`, `400 B
   ```
 
 #### 8. Save / Unsave Post — `POST /api/posts/:id/save`
+
 - **Access**: Public
 - **Request Body (optional)**:
   ```json
@@ -953,7 +1083,7 @@ All endpoints return standard HTTP status codes (`200 OK`, `201 Created`, `400 B
     "userId": 2
   }
   ```
-  *(Defaults to active user or `userId: 1` if omitted)*
+  _(Defaults to active user or `userId: 1` if omitted)_
 - **Response (`200 OK`)**:
   ```json
   {
@@ -972,30 +1102,33 @@ All endpoints return standard HTTP status codes (`200 OK`, `201 Created`, `400 B
 
 ---
 
-### Photo Upload Endpoints
+### Photo Upload Endpoints (Vercel Storage)
 
 #### 1. Upload User Avatar — `POST /api/users/:id/photo`
+
 - **Aliases**: `/api/users/:id/avatar`, `/api/upload/user/:id`
 - **Content-Type**: `multipart/form-data`
 - **Accepted Field Names**: `photo`, `image`, `avatar`, `file`
 - **Allowed Types**: JPG, PNG, GIF, WEBP, SVG (&le; 5 MB)
+- **Destination**: Vercel Storage ([Vercel Blob](https://vercel.com/storage/blob))
 - **Response (`200 OK`)**:
   ```json
   {
-    "message": "User profile photo uploaded successfully",
-    "avatarUrl": "/uploads/users/user-1.jpg",
-    "fullUrl": "http://localhost:5000/uploads/users/user-1.jpg",
-    "filename": "user-1.jpg",
+    "message": "User profile photo uploaded successfully to Vercel storage",
+    "avatarUrl": "https://r94m1c8s2y.public.blob.vercel-storage.com/users/user-1-k7p9m2a.jpg",
+    "fullUrl": "https://r94m1c8s2y.public.blob.vercel-storage.com/users/user-1-k7p9m2a.jpg",
+    "pathname": "users/user-1-k7p9m2a.jpg",
     "size": 45210,
+    "storage": "vercel-blob",
     "user": {
       "id": 1,
       "name": "Thura",
       "username": "thura",
       "email": "thura@example.com",
-      "avatarUrl": "/uploads/users/user-1.jpg",
+      "avatarUrl": "https://r94m1c8s2y.public.blob.vercel-storage.com/users/user-1-k7p9m2a.jpg",
       "bio": "Passionate React & Node.js Developer.",
       "createdAt": "2026-08-01T10:00:00.000Z",
-      "updatedAt": "2026-10-23T08:40:00.000Z"
+      "updatedAt": "2026-11-15T23:30:00.000Z"
     }
   }
   ```
@@ -1003,24 +1136,45 @@ All endpoints return standard HTTP status codes (`200 OK`, `201 Created`, `400 B
   - `400 Bad Request`: `{"error": "Invalid file type. Only image files (JPG, PNG, GIF, WEBP, SVG) are allowed."}` or `{"error": "File is too large. Maximum allowed size is 5MB."}`
   - `404 Not Found`: `{"error": "User not found"}`
 
-#### 2. Upload Post Cover Image — `POST /api/posts/:id/photo`
+#### 2. Delete User Avatar — `DELETE /api/users/:id/photo`
+
+- **Aliases**: `DELETE /api/users/:id/avatar`
+- **Description**: Deletes any linked avatar blob from Vercel Storage and resets avatar to default placeholder.
+- **Response (`200 OK`)**:
+  ```json
+  {
+    "message": "User profile photo removed successfully from Vercel storage",
+    "avatarUrl": "https://i.pravatar.cc/150?u=thura",
+    "user": {
+      "id": 1,
+      "name": "Thura",
+      "username": "thura",
+      "avatarUrl": "https://i.pravatar.cc/150?u=thura"
+    }
+  }
+  ```
+
+#### 3. Upload Post Cover Image — `POST /api/posts/:id/photo`
+
 - **Aliases**: `/api/posts/:id/image`, `/api/upload/post/:id`
 - **Content-Type**: `multipart/form-data`
 - **Accepted Field Names**: `photo`, `image`, `avatar`, `file`
 - **Allowed Types**: JPG, PNG, GIF, WEBP, SVG (&le; 5 MB)
+- **Destination**: Vercel Storage ([Vercel Blob](https://vercel.com/storage/blob))
 - **Response (`200 OK`)**:
   ```json
   {
-    "message": "Post photo uploaded successfully",
-    "imageUrl": "/uploads/posts/post-1.png",
-    "fullUrl": "http://localhost:5000/uploads/posts/post-1.png",
-    "filename": "post-1.png",
+    "message": "Post photo uploaded successfully to Vercel storage",
+    "imageUrl": "https://r94m1c8s2y.public.blob.vercel-storage.com/posts/post-1-x8z4w1b.png",
+    "fullUrl": "https://r94m1c8s2y.public.blob.vercel-storage.com/posts/post-1-x8z4w1b.png",
+    "pathname": "posts/post-1-x8z4w1b.png",
     "size": 89124,
+    "storage": "vercel-blob",
     "post": {
       "id": 1,
       "userId": 1,
       "title": "Getting Started with React",
-      "imageUrl": "/uploads/posts/post-1.png",
+      "imageUrl": "https://r94m1c8s2y.public.blob.vercel-storage.com/posts/post-1-x8z4w1b.png",
       "likes": [2, 3, 4, 5],
       "likesCount": 4,
       "isLiked": false,
@@ -1028,7 +1182,7 @@ All endpoints return standard HTTP status codes (`200 OK`, `201 Created`, `400 B
       "isSaved": false,
       "isArchived": false,
       "createdAt": "2026-08-20T10:00:00.000Z",
-      "updatedAt": "2026-10-23T08:41:00.000Z",
+      "updatedAt": "2026-11-15T23:31:00.000Z",
       "author": {
         "id": 1,
         "name": "Thura",
@@ -1042,11 +1196,50 @@ All endpoints return standard HTTP status codes (`200 OK`, `201 Created`, `400 B
   - `400 Bad Request`: `{"error": "File is too large. Maximum allowed size is 5MB."}`
   - `404 Not Found`: `{"error": "Post not found"}`
 
+#### 4. Delete Post Photo — `DELETE /api/posts/:id/photo`
+
+- **Aliases**: `DELETE /api/posts/:id/image`
+- **Description**: Deletes any linked cover image blob from Vercel Storage and resets image to `null`.
+- **Response (`200 OK`)**:
+  ```json
+  {
+    "message": "Post photo removed successfully from Vercel storage",
+    "imageUrl": null,
+    "post": {
+      "id": 1,
+      "imageUrl": null
+    }
+  }
+  ```
+
+#### 5. Storage Status & Health Check — `GET /api/storage/status`
+
+- **Description**: Returns configuration state of the active cloud storage provider.
+- **Response (`200 OK`)**:
+  ```json
+  {
+    "status": "ok",
+    "provider": "vercel-blob",
+    "configured": true,
+    "serverDiskStorage": "disabled (zero disk footprint)",
+    "allowedMimes": [
+      "image/jpeg",
+      "image/jpg",
+      "image/png",
+      "image/gif",
+      "image/webp",
+      "image/svg+xml"
+    ],
+    "maxFileSizeBytes": 5242880
+  }
+  ```
+
 ---
 
 ### Form Testing & Echo Endpoints
 
 #### Submit / Echo Form Data — `POST` / `GET` / `PUT` / `PATCH` `/api/forms/submit`
+
 - **Aliases**: `/api/forms/test`, `/api/form-submit`
 - **Content-Types**: `application/x-www-form-urlencoded`, `application/json`, `multipart/form-data`
 - **Query Parameter**: `?format=html` (renders styled visual dashboard inside browser)
@@ -1082,6 +1275,7 @@ All endpoints return standard HTTP status codes (`200 OK`, `201 Created`, `400 B
 ### Comments Endpoints
 
 #### 1. List Comments for a Post — `GET /api/posts/:postId/comments`
+
 - **Access**: Public
 - **Response (`200 OK`)**:
   ```json
@@ -1108,6 +1302,7 @@ All endpoints return standard HTTP status codes (`200 OK`, `201 Created`, `400 B
   ```
 
 #### 2. Create Comment — `POST /api/posts/:postId/comments`
+
 - **Access**: Public (Defaults to active user or `userId: 1`)
 - **Request Body**:
   ```json
@@ -1135,6 +1330,7 @@ All endpoints return standard HTTP status codes (`200 OK`, `201 Created`, `400 B
 ### Users Endpoints
 
 #### 1. List Users — `GET /api/users`
+
 - **Access**: Public
 - **Response (`200 OK`)**:
   ```json
@@ -1163,6 +1359,7 @@ All endpoints return standard HTTP status codes (`200 OK`, `201 Created`, `400 B
   ```
 
 #### 2. Get User by ID — `GET /api/users/:id`
+
 - **Access**: Public
 - **Response (`200 OK`)**:
   ```json
@@ -1181,6 +1378,7 @@ All endpoints return standard HTTP status codes (`200 OK`, `201 Created`, `400 B
   - `404 Not Found`: `{"error": "User not found"}`
 
 #### 3. Update User — `PUT /api/users/:id`
+
 - **Access**: Public
 - **Request Body**:
   ```json
@@ -1206,6 +1404,7 @@ All endpoints return standard HTTP status codes (`200 OK`, `201 Created`, `400 B
   - `404 Not Found`: `{"error": "User not found"}`
 
 #### 4. Delete User — `DELETE /api/users/:id`
+
 - **Access**: Public
 - **Response (`200 OK`)**:
   ```json
@@ -1242,6 +1441,7 @@ curl -X POST http://localhost:5000/api/posts \
 ```
 
 Response:
+
 ```json
 {
   "id": 1729234567890,
@@ -1265,35 +1465,39 @@ Response:
 
 ---
 
-### 2. Uploading a User Profile Photo
+### 2. Uploading a User Profile Photo to Vercel Storage
 
 Using **cURL**:
+
 ```bash
 curl -X POST http://localhost:5000/api/users/1/photo \
   -F "photo=@/path/to/avatar.jpg"
 ```
 
-Response:
+Response (`200 OK`):
+
 ```json
 {
-  "message": "User profile photo uploaded successfully",
-  "avatarUrl": "/uploads/users/user-1.jpg",
-  "fullUrl": "http://localhost:5000/uploads/users/user-1.jpg",
-  "filename": "user-1.jpg",
+  "message": "User profile photo uploaded successfully to Vercel storage",
+  "avatarUrl": "https://r94m1c8s2y.public.blob.vercel-storage.com/users/user-1-k7p9m2a.jpg",
+  "fullUrl": "https://r94m1c8s2y.public.blob.vercel-storage.com/users/user-1-k7p9m2a.jpg",
+  "pathname": "users/user-1-k7p9m2a.jpg",
   "size": 45210,
+  "storage": "vercel-blob",
   "user": {
     "id": 1,
     "name": "Thura",
     "username": "thura",
     "email": "thura@example.com",
-    "avatarUrl": "/uploads/users/user-1.jpg",
+    "avatarUrl": "https://r94m1c8s2y.public.blob.vercel-storage.com/users/user-1-k7p9m2a.jpg",
     "bio": "Passionate React & Node.js Developer.",
-    "updatedAt": "2026-10-18T12:30:00.000Z"
+    "updatedAt": "2026-11-15T23:30:00.000Z"
   }
 }
 ```
 
 Using **Postman**:
+
 1. Method: `POST`
 2. URL: `http://localhost:5000/api/users/1/photo`
 3. Body: Select `form-data`
@@ -1303,28 +1507,31 @@ Using **Postman**:
 
 ---
 
-### 3. Uploading a Post Photo
+### 3. Uploading a Post Photo to Vercel Storage
 
 Using **cURL**:
+
 ```bash
 curl -X POST http://localhost:5000/api/posts/1/photo \
   -F "image=@/path/to/cover.png"
 ```
 
-Response:
+Response (`200 OK`):
+
 ```json
 {
-  "message": "Post photo uploaded successfully",
-  "imageUrl": "/uploads/posts/post-1.png",
-  "fullUrl": "http://localhost:5000/uploads/posts/post-1.png",
-  "filename": "post-1.png",
+  "message": "Post photo uploaded successfully to Vercel storage",
+  "imageUrl": "https://r94m1c8s2y.public.blob.vercel-storage.com/posts/post-1-x8z4w1b.png",
+  "fullUrl": "https://r94m1c8s2y.public.blob.vercel-storage.com/posts/post-1-x8z4w1b.png",
+  "pathname": "posts/post-1-x8z4w1b.png",
   "size": 89124,
+  "storage": "vercel-blob",
   "post": {
     "id": 1,
     "userId": 1,
     "title": "Getting Started with React",
-    "imageUrl": "/uploads/posts/post-1.png",
-    "updatedAt": "2026-10-18T12:35:00.000Z"
+    "imageUrl": "https://r94m1c8s2y.public.blob.vercel-storage.com/posts/post-1-x8z4w1b.png",
+    "updatedAt": "2026-11-15T23:31:00.000Z"
   }
 }
 ```
@@ -1334,12 +1541,14 @@ Response:
 ### 4. Testing Upload Error Scenarios
 
 #### Testing Invalid File Type (e.g. uploading a `.pdf` or `.txt` file):
+
 ```bash
 curl -X POST http://localhost:5000/api/users/1/photo \
   -F "photo=@/path/to/document.pdf"
 ```
 
 Response (`400 Bad Request`):
+
 ```json
 {
   "error": "Invalid file type. Only image files (JPG, PNG, GIF, WEBP, SVG) are allowed."
@@ -1347,12 +1556,14 @@ Response (`400 Bad Request`):
 ```
 
 #### Testing File Size Exceeded (> 5 MB):
+
 ```bash
 curl -X POST http://localhost:5000/api/users/1/photo \
   -F "photo=@/path/to/large_image_8mb.jpg"
 ```
 
 Response (`400 Bad Request`):
+
 ```json
 {
   "error": "File is too large. Maximum allowed size is 5MB."
@@ -1360,12 +1571,14 @@ Response (`400 Bad Request`):
 ```
 
 #### Testing Non-Existent User or Post ID:
+
 ```bash
 curl -X POST http://localhost:5000/api/users/9999/photo \
   -F "photo=@/path/to/avatar.jpg"
 ```
 
 Response (`404 Not Found`):
+
 ```json
 {
   "error": "User not found"
@@ -1374,13 +1587,17 @@ Response (`404 Not Found`):
 
 ---
 
-### 5. Verifying Deterministic ID Overwrite
+### 5. Verifying Cloud Blob Lifecycle & Overwrite Cleanup
 
-1. Upload `avatar.jpg` for User 1:
-   - Check `./uploads/users/` — `user-1.jpg` is created.
-2. Upload `avatar.webp` for User 1:
-   - Check `./uploads/users/` — `user-1.jpg` is automatically unlinked and replaced with `user-1.webp`.
-3. Disk space remains lean with exactly one image per ID.
+4. **Initial Upload**: Upload `avatar.jpg` for User 1:
+   - File is streamed to Vercel Storage in-memory.
+   - User `avatarUrl` is set to the new Vercel Blob CDN URL.
+   - Server disk usage is **`0 MB`**.
+5. **Subsequent Upload**: Upload `avatar.webp` for User 1:
+   - Previous blob (`avatar.jpg`) on Vercel Storage is automatically deleted via `storageService.deleteBlob()`.
+   - New blob URL is assigned. No orphaned files remain in Vercel Storage or on server disk.
+6. **Photo Deletion**: Call `DELETE /api/users/1/photo`:
+   - Cloud blob is removed from Vercel Storage, and avatar resets to default placeholder.
 
 ---
 
@@ -1390,20 +1607,28 @@ Use a standard raw HTML `<form>` to test text fields, radios, checkboxes, and se
 
 ```html
 <form action="http://localhost:5000/api/forms/submit" method="POST">
-  <label>Username: <input type="text" name="username" value="johndoe" /></label><br>
-  <label>Email: <input type="email" name="email" value="john@example.com" /></label><br>
-  <label>Role:
+  <label>Username: <input type="text" name="username" value="johndoe" /></label
+  ><br />
+  <label
+    >Email: <input type="email" name="email" value="john@example.com" /></label
+  ><br />
+  <label
+    >Role:
     <select name="role">
       <option value="developer" selected>Developer</option>
       <option value="designer">Designer</option>
-    </select>
-  </label><br>
-  <label><input type="checkbox" name="newsletter" value="yes" checked /> Subscribe</label><br>
+    </select> </label
+  ><br />
+  <label
+    ><input type="checkbox" name="newsletter" value="yes" checked />
+    Subscribe</label
+  ><br />
   <button type="submit">Submit Form</button>
 </form>
 ```
 
 Testing via **cURL**:
+
 ```bash
 curl -X POST http://localhost:5000/api/forms/submit \
   -H "Content-Type: application/x-www-form-urlencoded" \
@@ -1411,6 +1636,7 @@ curl -X POST http://localhost:5000/api/forms/submit \
 ```
 
 Response:
+
 ```json
 {
   "success": true,
@@ -1435,18 +1661,19 @@ Response:
 ### 7. Testing JavaScript JSON Form Submissions (`application/json`)
 
 Using client-side JavaScript (`fetch`):
+
 ```javascript
 const formData = {
   fullName: "Alice Smith",
   department: "Engineering",
   skills: ["React", "Node.js", "Docker"],
-  notifications: true
+  notifications: true,
 };
 
 const response = await fetch("http://localhost:5000/api/forms/submit", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
-  body: JSON.stringify(formData)
+  body: JSON.stringify(formData),
 });
 
 const result = await response.json();
@@ -1454,6 +1681,7 @@ console.log("Form Echo Result:", result);
 ```
 
 Response:
+
 ```json
 {
   "success": true,
@@ -1478,8 +1706,13 @@ Response:
 ### 8. Testing Multipart Forms with Attached Files (`multipart/form-data`)
 
 HTML Form with file attachment:
+
 ```html
-<form action="http://localhost:5000/api/forms/submit" method="POST" enctype="multipart/form-data">
+<form
+  action="http://localhost:5000/api/forms/submit"
+  method="POST"
+  enctype="multipart/form-data"
+>
   <input type="text" name="feedbackTitle" value="Great API!" />
   <input type="file" name="screenshot" />
   <button type="submit">Submit Feedback</button>
@@ -1487,6 +1720,7 @@ HTML Form with file attachment:
 ```
 
 Using **cURL**:
+
 ```bash
 curl -X POST http://localhost:5000/api/forms/submit \
   -F "feedbackTitle=Great API!" \
@@ -1494,6 +1728,7 @@ curl -X POST http://localhost:5000/api/forms/submit \
 ```
 
 Response:
+
 ```json
 {
   "success": true,
@@ -1525,8 +1760,8 @@ Response:
 When testing directly inside a browser without opening developer tools, submit to `http://localhost:5000/api/forms/submit?format=html`.
 
 The server responds with an HTML page featuring:
+
 - Visual badges for HTTP method and content type.
 - A styled table of all submitted text fields and detected types.
 - A styled table of attached files with original names, MIME types, and sizes.
 - Formatted raw JSON payload box for quick copying.
-
