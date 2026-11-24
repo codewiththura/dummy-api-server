@@ -2,9 +2,9 @@ name: Build, Test, and Publish Docker Image
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
   workflow_dispatch:
 
 env:
@@ -23,7 +23,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm'
+          cache: "npm"
 
       - name: Install dependencies
         run: npm ci
@@ -92,28 +92,5 @@ jobs:
           port: ${{ secrets.VPS_PORT || 22 }}
           script: |
             set -e
-            IMAGE_NAME="ghcr.io/${{ github.repository }}:latest"
-            
-            echo "🚀 Pulling latest Docker image from GHCR..."
-            docker pull $IMAGE_NAME
-            
-            echo "🛑 Stopping and removing previous container..."
-            docker stop social-app-api social-app-api-container 2>/dev/null || true
-            docker rm social-app-api social-app-api-container 2>/dev/null || true
-            
-            echo "▶️ Launching updated container connected to reverse-proxy network..."
-            docker run -d \
-              --name social-app-api \
-              --network telegram-bot-v1_default \
-              -p 5000:5000 \
-              -e BLOB_READ_WRITE_TOKEN="${{ secrets.BLOB_READ_WRITE_TOKEN }}" \
-              --restart unless-stopped \
-              $IMAGE_NAME
-            
-            echo "🧹 Pruning old unused images..."
-            docker image prune -f
-            
-            echo "✅ Deployment successful! Active container:"
-            docker ps --filter "name=social-app-api"
-
-
+            ~/apps/deploy.sh dummy-api-server
+            docker ps --filter "name=dummy-api-server"
